@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "voltGo",
+    "slug": "voltGo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#3EE06A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.voltgo.app",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "VoltGO uses Face ID for fast, secure sign-in."
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyAk8BLnZJ0PzUOJXdU2IUmTJTDwwsbS_3s"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#3EE06A",
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.voltgo.app",
+      "permissions": ["USE_FINGERPRINT", "USE_BIOMETRIC"],
+      "predictiveBackGestureEnabled": false,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAk8BLnZJ0PzUOJXdU2IUmTJTDwwsbS_3s"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-font"]
+  }
+}
