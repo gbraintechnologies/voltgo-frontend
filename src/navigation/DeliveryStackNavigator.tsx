@@ -38,10 +38,7 @@ export default function DeliveryStackNavigator() {
       <Stack.Screen
         name="SchedulePickup"
         component={SchedulePickupScreen}
-        options={{
-          presentation: "modal", // ← modal for this one
-          animation: "slide_from_bottom",
-        }}
+        options={{ animation: "slide_from_bottom" }} 
       />
 
       <Stack.Screen name="DeliveryDetails" component={DeliveryDetailsScreen} />
@@ -80,10 +77,7 @@ export default function DeliveryStackNavigator() {
       <Stack.Screen
         name="RiderFound"
         component={RiderFoundScreen}
-        options={{
-          presentation: "modal", // ← modal for this one
-          animation: "slide_from_bottom",
-        }}
+        options={{ animation: "slide_from_bottom" }} 
       />
       <Stack.Screen name="RiderArriving" component={RiderArrivingScreen} />
       <Stack.Screen name="ActiveDelivery" component={ActiveDeliveryScreen} />

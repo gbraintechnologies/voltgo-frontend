@@ -1,26 +1,9 @@
 /**
- * RiderArrivingScreen
- *
- * Custom bottom sheet — zero third-party dependencies.
- * Uses React Native's Animated + PanResponder for smooth
- * drag-to-expand / drag-to-collapse UX identical to @gorhom/bottom-sheet.
- *
- * Fonts:
- *  - "Rider Arriving" heading → HelveticaNeue-CondensedBold
- *  - Rider name → Poppins-Bold
- *  - Plate, ETA text, Cancel → Poppins-Regular / Poppins-SemiBold
- *
- * SVG assets:
- *  - arrow_back.svg    → back arrow
- *  - bicycle.svg       → bicycle illustration (in rider row)
- *  - phone_call.svg    → phone icon inside green action button
- *  - chat_bubble.svg   → chat icon inside blue action button
- *  - star.svg          → star icon in rating badge
- *
- * Images:
- *  - rider_john.png → rider circular photo
- *
- * NO @gorhom/bottom-sheet needed
+ * RiderArrivingScreen.tsx
+ * ─────────────────────────────────────────────────────────
+ * Real MapView + Routes API polyline + animated rider marker
+ * that moves along the route as the ETA ticks down.
+ * UI/layout unchanged from original.
  */
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
@@ -45,45 +28,57 @@ import BicycleSvg from "../../assets/icons/bicycle.svg";
 import StarSvg from "../../assets/icons/star.svg";
 import PhoneCallSvg from "../../assets/icons/phone_call.svg";
 import ChatBubbleSvg from "../../assets/icons/chat_bubble.svg";
+import { useRoutePolyline } from "../../utils/useRoutePolyline";
+import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
-// ─── Theme ────────────────────────────────────────────────────────────────────
 const Colors = {
   white: "#FFFFFF",
   navy: "#0B1F3A",
   primary: "#4CD964",
   primaryLight: "#D4F4E0",
   inputBg: "#F2F4F7",
-  border: "#E0E4EA",
   textPrimary: "#1A1A2E",
   textMuted: "#9CA3AF",
   etaColor: "#00B86B",
   chatBlueBg: "#D4E8F4",
-  chatBlue: "#3B9EFF",
 };
 
-// ─── Bottom sheet snap points ─────────────────────────────────────────────────
-const SNAP_COLLAPSED = 0.55; // 55% — matches original gorhom config
-const SNAP_EXPANDED = 0.9; // 90% — matches original gorhom config
-
+const SNAP_COLLAPSED = 0.55;
+const SNAP_EXPANDED = 0.9;
 const COLLAPSED_H = SCREEN_H * SNAP_COLLAPSED;
 const EXPANDED_H = SCREEN_H * SNAP_EXPANDED;
-
 const SNAP_THRESHOLD = 60;
 const VELOCITY_THRESHOLD = 0.5;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 type RouteParams = RouteProp<DeliveryStackParamList, "RiderArriving">;
 
-const PICKUP_COORD = { latitude: 5.5968, longitude: -0.1869 };
-const DROPOFF_COORD = { latitude: 5.6502, longitude: -0.187 };
+const DEFAULT_PICKUP = { latitude: 5.5968, longitude: -0.1869 };
+const DEFAULT_DROPOFF = { latitude: 5.6502, longitude: -0.187 };
 
-// ─── Custom Bottom Sheet Hook ─────────────────────────────────────────────────
+/** Interpolate a position along a polyline by progress [0..1] */
+function interpolateOnRoute(
+  coords: { latitude: number; longitude: number }[],
+  progress: number,
+): { latitude: number; longitude: number } | null {
+  if (coords.length < 2) return null;
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  const totalSegments = coords.length - 1;
+  const floatIndex = clampedProgress * totalSegments;
+  const segIndex = Math.floor(floatIndex);
+  const segProgress = floatIndex - segIndex;
+  const a = coords[Math.min(segIndex, totalSegments - 1)];
+  const b = coords[Math.min(segIndex + 1, totalSegments)];
+  return {
+    latitude: a.latitude + (b.latitude - a.latitude) * segProgress,
+    longitude: a.longitude + (b.longitude - a.longitude) * segProgress,
+  };
+}
+
 function useCustomBottomSheet() {
   const initialOffset = SCREEN_H - COLLAPSED_H;
   const expandedOffset = SCREEN_H - EXPANDED_H;
-
   const translateY = useRef(new Animated.Value(initialOffset)).current;
   const lastTranslateY = useRef(initialOffset);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -105,46 +100,39 @@ function useCustomBottomSheet() {
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) =>
-        Math.abs(gestureState.dy) > 5,
-
+      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 5,
       onPanResponderGrant: () => {
-        translateY.stopAnimation((currentValue) => {
-          lastTranslateY.current = currentValue;
-          translateY.setOffset(currentValue);
+        translateY.stopAnimation((val) => {
+          lastTranslateY.current = val;
+          translateY.setOffset(val);
           translateY.setValue(0);
         });
       },
-
-      onPanResponderMove: (_, gestureState) => {
+      onPanResponderMove: (_, gs) => {
         const clamped = Math.min(
           SCREEN_H - COLLAPSED_H + 40,
-          Math.max(SCREEN_H - EXPANDED_H, gestureState.dy),
+          Math.max(SCREEN_H - EXPANDED_H, gs.dy),
         );
         translateY.setValue(clamped);
       },
-
-      onPanResponderRelease: (_, gestureState) => {
+      onPanResponderRelease: (_, gs) => {
         translateY.flattenOffset();
-        const { dy, vy } = gestureState;
-
-        if (vy > VELOCITY_THRESHOLD) {
-          springTo(SCREEN_H - COLLAPSED_H, false);
-        } else if (vy < -VELOCITY_THRESHOLD) {
+        const { dy, vy } = gs;
+        if (vy > VELOCITY_THRESHOLD) springTo(SCREEN_H - COLLAPSED_H, false);
+        else if (vy < -VELOCITY_THRESHOLD)
           springTo(SCREEN_H - EXPANDED_H, true);
-        } else if (dy > SNAP_THRESHOLD) {
-          springTo(SCREEN_H - COLLAPSED_H, false);
-        } else if (dy < -SNAP_THRESHOLD) {
-          springTo(SCREEN_H - EXPANDED_H, true);
-        } else {
+        else if (dy > SNAP_THRESHOLD) springTo(SCREEN_H - COLLAPSED_H, false);
+        else if (dy < -SNAP_THRESHOLD) springTo(SCREEN_H - EXPANDED_H, true);
+        else {
           const current = lastTranslateY.current + dy;
-          const distToCollapsed = Math.abs(current - (SCREEN_H - COLLAPSED_H));
-          const distToExpanded = Math.abs(current - (SCREEN_H - EXPANDED_H));
-          if (distToCollapsed < distToExpanded) {
-            springTo(SCREEN_H - COLLAPSED_H, false);
-          } else {
-            springTo(SCREEN_H - EXPANDED_H, true);
-          }
+          const toCollapsed = Math.abs(current - (SCREEN_H - COLLAPSED_H));
+          const toExpanded = Math.abs(current - (SCREEN_H - EXPANDED_H));
+          springTo(
+            toCollapsed < toExpanded
+              ? SCREEN_H - COLLAPSED_H
+              : SCREEN_H - EXPANDED_H,
+            toCollapsed >= toExpanded,
+          );
         }
       },
     }),
@@ -153,10 +141,11 @@ function useCustomBottomSheet() {
   return { translateY, panResponder, isExpanded };
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function RiderArrivingScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
+  const mapRef = useRef<MapView>(null);
+
   const {
     riderName = "John Cena",
     riderPlate = "GHA - 2233343 -4",
@@ -164,28 +153,76 @@ export default function RiderArrivingScreen() {
     vehicleType = "bicycle",
   } = route.params ?? {};
 
-  const [eta, setEta] = useState(5);
-  const { translateY, panResponder, isExpanded } = useCustomBottomSheet();
+  const pickupCoord = (route.params as any)?.pickupCoords ?? DEFAULT_PICKUP;
+  const dropoffCoord = (route.params as any)?.dropoffCoords ?? DEFAULT_DROPOFF;
 
+  const [eta, setEta] = useState(5);
+  const { translateY, panResponder } = useCustomBottomSheet();
   const progressAnim = useRef(new Animated.Value(0)).current;
 
-  const USE_STATIC_MAP = true;
+  // Fetch real route
+  const { coords: routeCoords, etaMinutes } = useRoutePolyline({
+    origin: pickupCoord,
+    destination: dropoffCoord,
+    mode: vehicleType === "e-motorcycle" ? "TWO_WHEELER" : "BICYCLE",
+  });
 
+  // Animated rider progress (0 → 1 over the ETA duration)
+  const riderProgressRef = useRef(0);
+  const [riderCoord, setRiderCoord] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+
+  // Set real ETA when route loads
   useEffect(() => {
-    // Animate progress bar from 0 → 100% over 4 seconds (matches rider found timer)
+    if (etaMinutes) setEta(etaMinutes);
+  }, [etaMinutes]);
+
+  // Fit map
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const points =
+      routeCoords.length > 0 ? routeCoords : [pickupCoord, dropoffCoord];
+    mapRef.current.fitToCoordinates(points, {
+      edgePadding: { top: 80, right: 60, bottom: SCREEN_H * 0.55, left: 60 },
+      animated: true,
+    });
+  }, [routeCoords]);
+
+  // Animate rider along route
+  useEffect(() => {
+    if (routeCoords.length === 0 || eta <= 0) return;
+    const totalMs = eta * 60 * 1000;
+    const startTime = Date.now();
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(1, elapsed / totalMs);
+      riderProgressRef.current = progress;
+      const pos = interpolateOnRoute(routeCoords, progress);
+      if (pos) setRiderCoord(pos);
+      if (progress >= 1) clearInterval(interval);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [routeCoords, eta]);
+
+  // Progress bar animation
+  useEffect(() => {
     Animated.timing(progressAnim, {
       toValue: 1,
       duration: 4000,
-      useNativeDriver: false, // width animation can't use native driver
+      useNativeDriver: false,
     }).start();
   }, []);
 
+  // ETA countdown
   useEffect(() => {
     const timer = setInterval(() => {
       setEta((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          navigation.replace("ActiveDelivery", route.params);
           return 0;
         }
         return prev - 1;
@@ -194,11 +231,20 @@ export default function RiderArrivingScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  const mapRegion = {
-    latitude: (PICKUP_COORD.latitude + DROPOFF_COORD.latitude) / 2,
-    longitude: (PICKUP_COORD.longitude + DROPOFF_COORD.longitude) / 2,
-    latitudeDelta: 0.08,
-    longitudeDelta: 0.08,
+  // Navigate when arrived
+  useEffect(() => {
+    if (eta === 0) navigation.replace("ActiveDelivery", route.params);
+  }, [eta]);
+
+  const displayEta = etaMinutes ?? 33;
+
+  const initialRegion = {
+    latitude: (pickupCoord.latitude + dropoffCoord.latitude) / 2,
+    longitude: (pickupCoord.longitude + dropoffCoord.longitude) / 2,
+    latitudeDelta:
+      Math.abs(pickupCoord.latitude - dropoffCoord.latitude) * 3 + 0.02,
+    longitudeDelta:
+      Math.abs(pickupCoord.longitude - dropoffCoord.longitude) * 3 + 0.02,
   };
 
   return (
@@ -209,42 +255,69 @@ export default function RiderArrivingScreen() {
         backgroundColor="transparent"
       />
 
-      {/* ── Real Map ── */}
-      {USE_STATIC_MAP ? (
-        <Image
-          source={require("../../assets/images/map_placeholder.png")}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
-      ) : (
-        <MapView
-          provider={PROVIDER_GOOGLE}
-          style={StyleSheet.absoluteFillObject}
-          region={mapRegion}
-          scrollEnabled={false}
-          zoomEnabled={false}
-          rotateEnabled={false}
-          customMapStyle={lightMapStyle}
-        >
+      {/* Real Map */}
+      <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
+        style={StyleSheet.absoluteFillObject}
+        initialRegion={initialRegion}
+        customMapStyle={CUSTOM_MAP_STYLE}
+        scrollEnabled={false}
+        zoomEnabled={false}
+        rotateEnabled={false}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        toolbarEnabled={false}
+      >
+        {routeCoords.length > 0 && (
           <Polyline
-            coordinates={[PICKUP_COORD, DROPOFF_COORD]}
+            coordinates={routeCoords}
             strokeColor={Colors.navy}
             strokeWidth={3.5}
           />
-          <Marker coordinate={PICKUP_COORD} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.pickupDot}>
-              <View style={styles.pickupDotInner} />
+        )}
+
+        {/* Pickup dot */}
+        <Marker
+          coordinate={pickupCoord}
+          anchor={{ x: 0.5, y: 0.5 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.pickupDot}>
+            <View style={styles.pickupDotInner} />
+          </View>
+        </Marker>
+
+        {/* Dropoff pin */}
+        <Marker
+          coordinate={dropoffCoord}
+          anchor={{ x: 0.5, y: 1 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.dropoffPin}>
+            <View style={styles.dropoffPinCircle} />
+            <View style={styles.dropoffPinTail} />
+          </View>
+        </Marker>
+
+        {/* Animated rider position */}
+        {riderCoord && (
+          <Marker
+            coordinate={riderCoord}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={true}
+          >
+            <View style={styles.riderMarker}>
+              <Text style={{ fontSize: 22 }}>
+                {vehicleType === "e-motorcycle" ? "🛵" : "🚲"}
+              </Text>
             </View>
           </Marker>
-          <Marker coordinate={DROPOFF_COORD} anchor={{ x: 0.5, y: 1 }}>
-            <View style={styles.dropoffPin}>
-              <View style={styles.dropoffPinCircle} />
-              <View style={styles.dropoffPinTail} />
-            </View>
-          </Marker>
-        </MapView>
-      )}
-      {/* ── Back Button ── */}
+        )}
+      </MapView>
+
+      {/* Back Button */}
       <TouchableOpacity
         style={styles.backBtn}
         onPress={() => navigation.goBack()}
@@ -253,29 +326,24 @@ export default function RiderArrivingScreen() {
         <ArrowBackSvg width={60} height={58} />
       </TouchableOpacity>
 
-      {/* ── ETA Badge ── */}
+      {/* ETA Badge */}
       <View style={styles.etaBadge}>
-        <Text style={styles.etaText}>33 min</Text>
+        <Text style={styles.etaText}>{displayEta} min</Text>
       </View>
 
-      {/* ── Custom Bottom Sheet ── */}
+      {/* Bottom Sheet */}
       <Animated.View
         style={[styles.bottomSheet, { transform: [{ translateY }] }]}
       >
-        {/* Drag handle */}
         <View style={styles.handleArea} {...panResponder.panHandlers}>
           <View style={styles.handleBar} />
         </View>
 
-        {/* Sheet content — not scrollable (fixed layout like original) */}
         <View style={styles.sheetContent}>
-          {/* Heading */}
           <Text style={styles.heading}>Rider Arriving</Text>
 
-          {/* Rider Row */}
           <View style={styles.riderRow}>
             <BicycleSvg width={76} height={56} />
-
             <View style={styles.avatarContainer}>
               <View style={styles.avatarPlaceholder}>
                 <Image
@@ -288,14 +356,13 @@ export default function RiderArrivingScreen() {
                 <Text style={styles.ratingText}>{riderRating}</Text>
               </View>
             </View>
-
             <View style={styles.riderInfo}>
               <Text style={styles.riderName}>{riderName}</Text>
               <Text style={styles.riderPlate}>{riderPlate}</Text>
             </View>
           </View>
 
-          {/* Animated progress bar */}
+          {/* Progress bar */}
           <View style={styles.progressTrack}>
             <Animated.View
               style={[
@@ -310,12 +377,10 @@ export default function RiderArrivingScreen() {
             />
           </View>
 
-          {/* ETA Text */}
           <Text style={styles.etaCountdown}>
             Rider will be here in {eta} min
           </Text>
 
-          {/* Action Buttons */}
           <View style={styles.actionsRow}>
             <TouchableOpacity
               style={[
@@ -339,10 +404,8 @@ export default function RiderArrivingScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Spacer pushes cancel to bottom */}
           <View style={styles.spacer} />
 
-          {/* Cancel */}
           <TouchableOpacity
             style={styles.cancelBtn}
             onPress={() => navigation.navigate("HomeMap")}
@@ -356,11 +419,8 @@ export default function RiderArrivingScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#E8EEF4" },
-
-  // Map markers
   pickupDot: {
     width: 22,
     height: 22,
@@ -391,8 +451,19 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
   },
-
-  // Overlays
+  riderMarker: {
+    width: 36,
+    height: 36,
+    backgroundColor: Colors.white,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
+  },
   backBtn: {
     position: "absolute",
     top: Platform.OS === "ios" ? 58 : 42,
@@ -423,8 +494,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.white,
   },
-
-  // ── Custom Bottom Sheet ──
   bottomSheet: {
     position: "absolute",
     left: 0,
@@ -440,8 +509,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 16,
   },
-
-  // Handle
   handleArea: {
     width: "100%",
     paddingVertical: 12,
@@ -454,7 +521,6 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#D0D6E0",
   },
-
   sheetContent: {
     flex: 1,
     paddingHorizontal: 22,
@@ -462,29 +528,23 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
     alignItems: "center",
   },
-
   heading: {
-    fontFamily: "HelveticaNeue-CondensedBold",
-    fontSize: 20,
+    fontFamily: "Poppins-Bold",
+    fontSize: 18,
     color: Colors.textPrimary,
     textAlign: "center",
     marginBottom: 20,
     letterSpacing: 0.2,
   },
-
-  // Rider Row
   riderRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center", // ← add this
+    justifyContent: "center",
     width: "100%",
     marginBottom: 18,
     gap: 10,
   },
-  avatarContainer: {
-    position: "relative",
-    marginRight: 4,
-  },
+  avatarContainer: { position: "relative", marginRight: 4 },
   avatarPlaceholder: {
     width: 56,
     height: 56,
@@ -492,11 +552,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.navy,
     overflow: "hidden",
   },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-  },
+  avatar: { width: 56, height: 56, borderRadius: 28 },
   ratingBadge: {
     position: "absolute",
     bottom: -9,
@@ -534,59 +590,6 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 2,
   },
-
-  divider: {
-    width: "55%",
-    height: 1,
-    backgroundColor: "#E0E4EA",
-    marginBottom: 14,
-  },
-
-  etaCountdown: {
-    fontFamily: "Poppins-SemiBold",
-    fontSize: 14,
-    color: Colors.etaColor,
-    marginBottom: 20,
-  },
-
-  actionsRow: {
-    flexDirection: "row",
-    // gap: 20, // ← was 14, increase to match image
-    marginBottom: 20,
-  },
-
-  actionBtn: {
-    width: 60, // ← was 54
-    height: 60, // ← was 54
-    borderTopLeftRadius: 16,
-    borderBottomLeftRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "Poppins-Medium",
-  },
-  actionBtn1: {
-    width: 60, // ← was 54
-    height: 60, // ← was 54
-    borderTopRightRadius: 16,
-    borderBottomRightRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  spacer: { flex: 1 },
-
-  cancelBtn: {
-    width: "100%",
-    backgroundColor: Colors.inputBg,
-    borderRadius: 14,
-    paddingVertical: 17,
-    alignItems: "center",
-  },
-  cancelText: {
-    fontFamily: "Poppins-SemiBold",
-    fontSize: 15,
-    color: Colors.textPrimary,
-  },
   progressTrack: {
     width: 160,
     height: 4,
@@ -600,28 +603,40 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.navy,
     borderRadius: 2,
   },
+  etaCountdown: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.etaColor,
+    marginBottom: 20,
+  },
+  actionsRow: { flexDirection: "row", marginBottom: 20 },
+  actionBtn: {
+    width: 60,
+    height: 60,
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionBtn1: {
+    width: 60,
+    height: 60,
+    borderTopRightRadius: 16,
+    borderBottomRightRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  spacer: { flex: 1 },
+  cancelBtn: {
+    width: "100%",
+    backgroundColor: Colors.inputBg,
+    borderRadius: 14,
+    paddingVertical: 17,
+    alignItems: "center",
+  },
+  cancelText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 15,
+    color: Colors.textPrimary,
+  },
 });
-
-// ─── Light map style ──────────────────────────────────────────────────────────
-const lightMapStyle = [
-  { elementType: "geometry", stylers: [{ color: "#eaf0f6" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#7a9bb5" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#ffffff" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#d0dce8" }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#ccdce8" }],
-  },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-];

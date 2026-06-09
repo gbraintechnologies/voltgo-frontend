@@ -1,4 +1,15 @@
-import React, { useRef, useCallback } from "react";
+/**
+ * HomeMapScreen.tsx (fixed)
+ * ─────────────────────────────────────────────────────────
+ * Key fixes:
+ *   ✅ Uses real MapView with PROVIDER_GOOGLE (not static image)
+ *   ✅ Custom map style applied for the clean light-grey look
+ *   ✅ Rider markers rendered correctly
+ *   ✅ User's device location shown via LocationContext
+ *   ✅ Bottom sheet snap logic preserved
+ */
+
+import React, { useRef, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -11,35 +22,38 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
+import MapView, { Marker, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { SvgXml } from "react-native-svg";
 import { Colors, Radius, Shadow } from "../../theme";
 import ParcelSvg from "../../assets/icons/package.svg";
 import Calendersvg from "../../assets/icons/sendpackage-calender.svg";
-import { Image } from "react-native";
+import { useDeviceLocation } from "../../contexts/LocationContext";
+import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
 
 const { height } = Dimensions.get("window");
 
-const INITIAL_REGION = {
-  latitude: 5.878,
-  longitude: 0.0555,
-  latitudeDelta: 0.025,
-  longitudeDelta: 0.025,
+// Default to Accra if location not yet resolved
+const DEFAULT_REGION: Region = {
+  latitude: 5.603717,
+  longitude: -0.186964,
+  latitudeDelta: 0.035,
+  longitudeDelta: 0.035,
 };
 
+// Sample nearby riders — replace with real data from your API
 const RIDERS = [
-  { id: 1, lat: 5.878, lng: 0.058, type: "bicycle" },
-  { id: 2, lat: 5.882, lng: 0.051, type: "scooter" },
-  { id: 3, lat: 5.875, lng: 0.062, type: "scooter" },
-  { id: 4, lat: 5.87, lng: 0.055, type: "bicycle" },
-  { id: 5, lat: 5.884, lng: 0.059, type: "bicycle" },
-  { id: 6, lat: 5.876, lng: 0.048, type: "scooter" },
+  { id: 1, lat: 5.606, lng: -0.184, type: "bicycle" },
+  { id: 2, lat: 5.610, lng: -0.191, type: "scooter" },
+  { id: 3, lat: 5.600, lng: -0.182, type: "scooter" },
+  { id: 4, lat: 5.598, lng: -0.188, type: "bicycle" },
+  { id: 5, lat: 5.612, lng: -0.180, type: "bicycle" },
+  { id: 6, lat: 5.596, lng: -0.194, type: "scooter" },
 ];
 
-// ── Snap points (module-level constants, defined once) ──────────────────────
-const SNAP_COLLAPSED = height * 0.73; // send package always visible (~22% of screen)
-const SNAP_EXPANDED  = height * 0.52; // expanded to roughly half screen
-const SNAP_FULL      = height * 0.52; // same as expanded — reaching here triggers navigation
+// ── Snap points ────────────────────────────────────────────────────────────
+const SNAP_COLLAPSED = height * 0.73;
+const SNAP_EXPANDED  = height * 0.52;
+const SNAP_FULL      = height * 0.52;
 
 const bicycleSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#3EE06A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
   <circle cx="18.5" cy="17.5" r="3.5"/>
@@ -56,35 +70,51 @@ const scooterSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" 
 </svg>`;
 
 export default function HomeMapScreen() {
-  const USE_STATIC_MAP = true;
-
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  const mapRef = useRef<MapView>(null);
 
+  // Get real device location
+  const { coords: deviceCoords, loading: locationLoading } = useDeviceLocation();
+
+  // Animate map to user's location once resolved
+  useEffect(() => {
+    if (deviceCoords && mapRef.current) {
+      mapRef.current.animateToRegion(
+        {
+          latitude: deviceCoords.latitude,
+          longitude: deviceCoords.longitude,
+          latitudeDelta: 0.025,
+          longitudeDelta: 0.025,
+        },
+        800,
+      );
+    }
+  }, [deviceCoords]);
+
+  // ── Bottom sheet ──────────────────────────────────────────────────────────
   const sheetY = useRef(new Animated.Value(SNAP_COLLAPSED)).current;
   const lastY = useRef(SNAP_COLLAPSED);
 
-const snapTo = useCallback(
-  (toValue: number) => {
-    lastY.current = toValue;
-    Animated.spring(sheetY, {
-      toValue,
-      useNativeDriver: true,
-      damping: 20,
-      stiffness: 200,
-      mass: 0.8,
-    }).start(({ finished }) => {
-      // When fully expanded, navigate to ChooseRoute
-      if (finished && toValue === SNAP_FULL) {
-        // Reset sheet back to collapsed before navigating
-        sheetY.setValue(SNAP_COLLAPSED);
-        lastY.current = SNAP_COLLAPSED;
-        navigation.navigate('DeliveryFlow');
-      }
-    });
-  },
-  [sheetY, navigation],
-);
+  const snapTo = useCallback(
+    (toValue: number) => {
+      lastY.current = toValue;
+      Animated.spring(sheetY, {
+        toValue,
+        useNativeDriver: true,
+        damping: 20,
+        stiffness: 200,
+        mass: 0.8,
+      }).start(({ finished }) => {
+        if (finished && toValue === SNAP_FULL) {
+          sheetY.setValue(SNAP_COLLAPSED);
+          lastY.current = SNAP_COLLAPSED;
+          navigation.navigate("DeliveryFlow");
+        }
+      });
+    },
+    [sheetY, navigation],
+  );
 
   const panResponder = useRef(
     PanResponder.create({
@@ -99,7 +129,6 @@ const snapTo = useCallback(
       },
 
       onPanResponderMove: (_, { dy }) => {
-        // ← updated ceiling to SNAP_FULL so it can drag all the way up
         const next = Math.min(
           Math.max(lastY.current + dy, SNAP_FULL),
           SNAP_COLLAPSED,
@@ -129,44 +158,43 @@ const snapTo = useCallback(
 
   return (
     <View style={styles.container}>
-      <StatusBar
-        barStyle="dark-content"
-        translucent
-        backgroundColor="transparent"
-      />
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
-      {USE_STATIC_MAP ? (
-        <Image
-          source={require("../../assets/images/map_long.png")}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
-      ) : (
-        <MapView
-          style={StyleSheet.absoluteFillObject}
-          provider={PROVIDER_DEFAULT}
-          initialRegion={INITIAL_REGION}
-          showsUserLocation
-          showsMyLocationButton={false}
-          mapType="standard"
-        >
-          {RIDERS.map((rider) => (
-            <Marker
-              key={rider.id}
-              coordinate={{ latitude: rider.lat, longitude: rider.lng }}
-              anchor={{ x: 0.5, y: 0.5 }}
-            >
-              <View style={styles.markerContainer}>
-                <SvgXml
-                  xml={rider.type === "bicycle" ? bicycleSvg : scooterSvg}
-                  width={32}
-                  height={32}
-                />
-              </View>
-            </Marker>
-          ))}
-        </MapView>
-      )}
+      {/* ── Real Map ── */}
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFillObject}
+        provider={PROVIDER_GOOGLE}
+        initialRegion={DEFAULT_REGION}
+        customMapStyle={CUSTOM_MAP_STYLE}
+        showsUserLocation
+        showsMyLocationButton={false}
+        showsCompass={false}
+        showsScale={false}
+        toolbarEnabled={false}
+        rotateEnabled={false}
+        mapType="standard"
+      >
+        {/* Rider markers */}
+        {RIDERS.map((rider) => (
+          <Marker
+            key={rider.id}
+            coordinate={{ latitude: rider.lat, longitude: rider.lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+          >
+            <View style={styles.markerContainer}>
+              <SvgXml
+                xml={rider.type === "bicycle" ? bicycleSvg : scooterSvg}
+                width={32}
+                height={32}
+              />
+            </View>
+          </Marker>
+        ))}
+      </MapView>
+
+      {/* ── Bottom Sheet ── */}
       <Animated.View
         style={[styles.sheet, { transform: [{ translateY: sheetY }] }]}
       >
@@ -174,9 +202,7 @@ const snapTo = useCallback(
           <View style={styles.handle} />
         </View>
 
-        <View
-          style={[styles.sheetContent, { paddingBottom: insets.bottom + 8 }]}
-        >
+        <View style={[styles.sheetContent, { paddingBottom: insets.bottom + 8 }]}>
           <TouchableOpacity
             style={styles.sendPackageRow}
             onPress={() => navigation.navigate("DeliveryFlow")}

@@ -48,6 +48,8 @@ export default function ReviewDeliveryScreen() {
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(18)).current;
 
+  const { isScheduled } = route.params ?? {};
+
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeIn, {
@@ -64,8 +66,17 @@ export default function ReviewDeliveryScreen() {
     ]).start();
   }, []);
 
-  const handleConfirm = () =>
+const handleConfirm = () => {
+  if (isScheduled) {
+    // Show scheduled success
+    navigation.navigate("DeliveryComplete", { 
+      ...route.params, 
+      isScheduled: true 
+    });
+  } else {
     navigation.navigate("RiderMatching", route.params);
+  }
+};
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -396,9 +407,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   confirmBtnText: {
-    fontFamily: "HelveticaNeue-CondensedBold",
+    fontFamily: "Poppins-SemiBold",
     fontSize: 17,
     color: Colors.textPrimary,
     letterSpacing: 0.3,
   },
 });
+
+

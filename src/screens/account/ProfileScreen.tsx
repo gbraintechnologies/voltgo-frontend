@@ -10,11 +10,13 @@ import {
   StatusBar,
   Image,
   Platform,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
-// Replace placeholder with:
-// import CameraSvg from '../../assets/icons/camera.svg';
+import { useCustomerProfile } from "../../hooks/useApi";
+import { useAuthStore } from "../../stores/authStore";
 
 const Colors = {
   white: "#FFFFFF",
@@ -30,9 +32,25 @@ const Colors = {
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();
   const fadeIn = useRef(new Animated.Value(0)).current;
-  const [name, setName] = useState("Cephas Ntiamoah");
-  const [email, setEmail] = useState("cephasntiamoah10@gmail.com");
-  const [phone, setPhone] = useState("+233 054 678 5064");
+
+  const { data, isLoading } = useCustomerProfile();
+  const storedCustomer = useAuthStore((s: any) => s.customer);
+  const setCustomer = useAuthStore((s: any) => s.setCustomer);
+
+  const profile = data?.data ?? storedCustomer;
+
+  const [name, setName] = useState(profile?.fullName ?? "");
+  const [email, setEmail] = useState(profile?.email ?? "");
+  const [phone, setPhone] = useState(profile?.phone ?? "");
+
+  // Sync fields when profile loads
+  useEffect(() => {
+    if (profile) {
+      setName(profile.fullName ?? "");
+      setEmail(profile.email ?? "");
+      setPhone(profile.phone ?? "");
+    }
+  }, [profile?.id]);
 
   useEffect(() => {
     Animated.timing(fadeIn, {
@@ -41,6 +59,11 @@ export default function ProfileScreen() {
       useNativeDriver: true,
     }).start();
   }, []);
+
+  // Profile editing is not yet in the API - show placeholder save
+  const handleSave = () => {
+    Alert.alert("Saved", "Profile update coming soon.");
+  };
 
   return (
     <View style={styles.container}>
@@ -58,72 +81,76 @@ export default function ProfileScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      <Animated.ScrollView
-        style={{ opacity: fadeIn }}
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Avatar */}
-        <View style={styles.avatarSection}>
-          <View style={styles.avatarWrap}>
-            {/*
-              Replace with:
-              <Image source={require('../../assets/images/avatar_user.jpg')} style={styles.avatar} />
-            */}
-            <Image
-              source={require("../../assets/images/rider_john.png")}
-              style={styles.avatar}
-            />
-
-            <TouchableOpacity style={styles.cameraBtn} activeOpacity={0.8}>
-              {/* Replace with: <CameraSvg width={16} height={16} /> */}
-              <View style={styles.cameraDot} />
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.avatarName}>{name}</Text>
+      {isLoading ? (
+        <View
+          style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+        >
+          <ActivityIndicator size="large" color={Colors.navy} />
         </View>
-
-        {/* Fields */}
-        <View style={styles.fieldsSection}>
-          <FieldLabel label="Full name" />
-          <View style={styles.inputWrap}>
-            <TextInput
-              style={styles.input}
-              value={name}
-              onChangeText={setName}
-              placeholderTextColor={Colors.textMuted}
-            />
+      ) : (
+        <Animated.ScrollView
+          style={{ opacity: fadeIn }}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.avatarSection}>
+            <View style={styles.avatarWrap}>
+              <Image
+                source={require("../../assets/images/rider_john.png")}
+                style={styles.avatar}
+              />
+              <TouchableOpacity style={styles.cameraBtn} activeOpacity={0.8}>
+                <View style={styles.cameraDot} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.avatarName}>{name || "User"}</Text>
           </View>
 
-          <FieldLabel label="Email address" />
-          <View style={styles.inputWrap}>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              placeholderTextColor={Colors.textMuted}
-            />
+          <View style={styles.fieldsSection}>
+            <FieldLabel label="Full name" />
+            <View style={styles.inputWrap}>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setName}
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+
+            <FieldLabel label="Email address" />
+            <View style={styles.inputWrap}>
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Add email address" // add this
+                keyboardType="email-address"
+                autoCapitalize="none"
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+
+            <FieldLabel label="Phone number" />
+            <View style={[styles.inputWrap, { backgroundColor: "#F8F8F8" }]}>
+              <TextInput
+                style={[styles.input, { color: Colors.textMuted }]}
+                value={phone}
+                editable={false}
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
           </View>
 
-          <FieldLabel label="Phone number" />
-          <View style={styles.inputWrap}>
-            <TextInput
-              style={styles.input}
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-              placeholderTextColor={Colors.textMuted}
-            />
-          </View>
-        </View>
-
-        <View style={{ height: 100 }} />
-      </Animated.ScrollView>
+          <View style={{ height: 100 }} />
+        </Animated.ScrollView>
+      )}
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.saveBtn} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.saveBtn}
+          activeOpacity={0.85}
+          onPress={handleSave}
+        >
           <Text style={styles.saveBtnText}>Save changes</Text>
         </TouchableOpacity>
       </View>
@@ -227,8 +254,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   saveBtnText: {
-    fontFamily: "HelveticaNeue-CondensedBold",
-    fontSize: 17,
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 15,
     color: Colors.textPrimary,
     letterSpacing: 0.3,
   },

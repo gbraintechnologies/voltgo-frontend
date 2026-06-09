@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 32 },
   scroll: { paddingHorizontal: 20, paddingTop: 8 },
   sectionTitle: {
-    fontFamily: 'HelveticaNeue-CondensedBold', fontSize: 15,
+    fontFamily: 'Poppins-Bold', fontSize: 15,
     color: Colors.navy, marginBottom: 10, letterSpacing: 0.1,
   },
   contactCard: { borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
     paddingVertical: 17, alignItems: 'center',
   },
   sendBtnText: {
-    fontFamily: 'HelveticaNeue-CondensedBold', fontSize: 17,
+    fontFamily: 'Poppins-SemiBold', fontSize: 15,
     color: Colors.textPrimary, letterSpacing: 0.3,
   },
 });

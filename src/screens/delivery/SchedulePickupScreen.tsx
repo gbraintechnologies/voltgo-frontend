@@ -24,25 +24,28 @@ const Colors = {
   radioInactive: "#D0D6E0",
 };
 
-function getDates() {
+function getDates(showAll: boolean) {
   const today = new Date();
   const fmt = (d: Date) =>
     d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const dayName = (d: Date) =>
     d.toLocaleDateString("en-US", { weekday: "long" });
-  return [
-    { id: "today", label: "Today", sub: fmt(today) },
+
+  const base = [
+    { id: "0", label: "Today", sub: fmt(today) },
     {
-      id: "tomorrow",
+      id: "1",
       label: "Tomorrow",
       sub: fmt(new Date(today.getTime() + 86400000)),
     },
-    {
-      id: "day2",
-      label: dayName(new Date(today.getTime() + 2 * 86400000)),
-      sub: fmt(new Date(today.getTime() + 2 * 86400000)),
-    },
   ];
+
+  const extra = [2, 3, 4, 5, 6].map((i) => {
+    const d = new Date(today.getTime() + i * 86400000);
+    return { id: String(i), label: dayName(d), sub: fmt(d) };
+  });
+
+  return showAll ? [...base, ...extra] : [...base, extra[0]];
 }
 
 function getTimeSlots() {
@@ -50,17 +53,18 @@ function getTimeSlots() {
   for (let h = 1; h <= 23; h++) {
     const start = `${String(h).padStart(2, "0")}:00`;
     const end = `${String(h).padStart(2, "0")}:30`;
-    slots.push({ id: `${h}`, label: `${start} - ${end}` });
+    slots.push({ id: String(h), label: `${start} - ${end}` });
   }
   return slots;
 }
 
-const DATES = getDates();
 const TIME_SLOTS = getTimeSlots();
 
 export default function SchedulePickupScreen() {
   const navigation = useNavigation<any>();
-  const [selectedDate, setSelectedDate] = useState(DATES[0].id);
+  const [showAllDates, setShowAllDates] = useState(false);
+  const DATES = getDates(showAllDates);
+  const [selectedDate, setSelectedDate] = useState("0");
   const [selectedSlot, setSelectedSlot] = useState(TIME_SLOTS[0].id);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
@@ -85,8 +89,6 @@ export default function SchedulePickupScreen() {
   const handleSelectTime = () => {
     const date = DATES.find((d) => d.id === selectedDate);
     const slot = TIME_SLOTS.find((s) => s.id === selectedSlot);
-
-    // Pass selected time back to ChooseRoute via params
     navigation.navigate("ChooseRoute", {
       selectedTime: `${date?.label}, ${slot?.label}`,
     });
@@ -150,8 +152,16 @@ export default function SchedulePickupScreen() {
                 </Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={styles.datePill} activeOpacity={0.75}>
-              <Text style={styles.morePillText}>More ›</Text>
+
+            {/* More / Less toggle */}
+            <TouchableOpacity
+              style={styles.datePill}
+              activeOpacity={0.75}
+              onPress={() => setShowAllDates((prev) => !prev)}
+            >
+              <Text style={styles.morePillText}>
+                {showAllDates ? "‹ Less" : "More ›"}
+              </Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -208,11 +218,7 @@ export default function SchedulePickupScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.white,
-  },
-
+  container: { flex: 1, backgroundColor: Colors.white },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -236,20 +242,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   headerSpacer: { width: 32 },
-
-  content: {
-    flex: 1,
-  },
-
-  datePillsWrapper: {
-    height: 96, // ← constrains the horizontal scroll row
-  },
-
+  content: { flex: 1 },
+  datePillsWrapper: { height: 96 },
   datePillsContainer: {
     paddingHorizontal: 20,
     gap: 10,
     paddingVertical: 12,
-    alignItems: "center", // ← prevents pills from stretching vertically
+    alignItems: "center",
   },
   datePill: {
     borderWidth: 1.5,
@@ -264,6 +263,7 @@ const styles = StyleSheet.create({
   datePillSelected: {
     borderColor: Colors.navy,
     borderWidth: 2,
+    backgroundColor: Colors.navy, // ← filled when selected
   },
   datePillLabel: {
     fontFamily: "Poppins-SemiBold",
@@ -271,9 +271,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: "center",
   },
-  datePillLabelSelected: {
-    color: Colors.navy,
-  },
+  datePillLabelSelected: { color: Colors.white }, // ← white text when selected
   datePillSub: {
     fontFamily: "Poppins-Regular",
     fontSize: 12,
@@ -281,9 +279,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textAlign: "center",
   },
-  datePillSubSelected: {
-    color: Colors.navy,
-  },
+  datePillSubSelected: { color: "rgba(255,255,255,0.75)" }, // ← dimmed white
   morePillText: {
     fontFamily: "Poppins-SemiBold",
     fontSize: 14,
@@ -291,11 +287,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 4,
   },
-
-  slotList: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
+  slotList: { flex: 1, paddingHorizontal: 20 },
   slotRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -330,7 +322,6 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: Colors.white,
   },
-
   footer: {
     paddingHorizontal: 20,
     paddingBottom: Platform.OS === "ios" ? 36 : 24,
@@ -363,3 +354,5 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 });
+
+

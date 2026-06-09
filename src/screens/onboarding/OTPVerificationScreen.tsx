@@ -11,12 +11,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Colors, Spacing, Radius } from "../../theme";
+import { RouteProp, useRoute } from "@react-navigation/native";
+import * as Haptics from "expo-haptics";
+import { Colors, Radius } from "../../theme";
 import { RootStackParamList } from "../../navigation/types";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
+import { useVerifyPhone, useSendOtp } from "../../hooks/useApi";
+import { useAuthStore } from "../../stores/authStore";
+import { ApiError } from "../../api/client";
+import { useToast } from "../../components/common/Toast";
 
 const { width, height } = Dimensions.get("window");
 const HERO_HEIGHT = height * 0.26;
@@ -28,13 +34,23 @@ type Props = {
 };
 
 export default function OTPVerificationScreen({ navigation }: Props) {
+  const route = useRoute<RouteProp<RootStackParamList, "OTPVerification">>();
+  const phoneParam = route.params?.phone ?? "";
+  const toast = useToast();
+
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [countdown, setCountdown] = useState(30);
   const inputRefs = useRef<(TextInput | null)[]>([]);
   const slideUp = useRef(new Animated.Value(30)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
-const insets = useSafeAreaInsets();
+  const insets = useSafeAreaInsets();
+
+  const pendingPhone = useAuthStore((s: any) => s.pendingPhone);
+  const phone = phoneParam || pendingPhone || "";
+
+  const verifyMutation = useVerifyPhone();
+  const sendOtpMutation = useSendOtp();
 
   useEffect(() => {
     Animated.parallel([
@@ -49,9 +65,7 @@ const insets = useSafeAreaInsets();
         friction: 9,
         useNativeDriver: true,
       }),
-    ]).start(() => {
-      inputRefs.current[0]?.focus();
-    });
+    ]).start(() => inputRefs.current[0]?.focus());
   }, []);
 
   useEffect(() => {
@@ -73,7 +87,11 @@ const insets = useSafeAreaInsets();
     }
     newOtp[index] = value;
     setOtp(newOtp);
-    if (value && index < OTP_LENGTH - 1) inputRefs.current[index + 1]?.focus();
+    // Subtle tick on each digit entry
+    if (value) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (index < OTP_LENGTH - 1) inputRefs.current[index + 1]?.focus();
+    }
   };
 
   const handleKeyPress = (e: any, index: number) => {
@@ -82,6 +100,8 @@ const insets = useSafeAreaInsets();
   };
 
   const shake = () => {
+    // Error haptic paired with shake animation
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     Animated.sequence([
       Animated.timing(shakeAnim, {
         toValue: 10,
@@ -111,27 +131,50 @@ const insets = useSafeAreaInsets();
     ]).start();
   };
 
-  const handleContinue = () => {
-    if (otp.join("").length < OTP_LENGTH) {
+  const handleContinue = async () => {
+    const code = otp.join("");
+    if (code.length < OTP_LENGTH) {
       shake();
       return;
     }
-    navigation.navigate("CreateProfile");
+
+    try {
+      await verifyMutation.mutateAsync({ phone, otp: code });
+      // Success — navigator handles transition via auth state
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      shake();
+      const msg =
+        err instanceof ApiError ? err.message : "Invalid or expired code.";
+      toast.error(msg);
+    }
+  };
+
+  const handleResend = async () => {
+    if (countdown > 0) return;
+    try {
+      await sendOtpMutation.mutateAsync(phone);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      toast.info("A new code has been sent to your phone.");
+      setCountdown(30);
+      setOtp(Array(OTP_LENGTH).fill(""));
+      inputRefs.current[0]?.focus();
+    } catch {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      toast.error("Could not resend OTP. Please try again.");
+    }
   };
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { marginTop: insets.top + 12 },]}
-      
+      style={[styles.container, { marginTop: insets.top + 12 }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <StatusBar barStyle="dark-content" backgroundColor={Colors.primary} />
 
-      {/* Hero */}
       <View style={styles.heroSection}>
         <Text style={styles.watermark}>VoltGO</Text>
         <View style={styles.illustrationWrap}>
-          {/* REPLACE: assets/images/notification_bell.png */}
           <Image
             source={require("../../../assets/images/notification_bell.png")}
             style={styles.illustration}
@@ -140,19 +183,17 @@ const insets = useSafeAreaInsets();
         </View>
       </View>
 
-      {/* Content */}
       <Animated.View
         style={[
           styles.contentSection,
           { opacity: fadeIn, transform: [{ translateY: slideUp }] },
         ]}
       >
-        <Text style={styles.heading}>Enter the 6-digit code</Text>
+        <Text style={styles.heading}>Enter the 5-digit code</Text>
         <Text style={styles.subtitle}>
-          Check your SMS or Whatsapp for the code
+          Check your SMS for the code{phone ? ` sent to ${phone}` : ""}
         </Text>
 
-        {/* OTP Boxes */}
         <Animated.View
           style={[styles.otpRow, { transform: [{ translateX: shakeAnim }] }]}
         >
@@ -176,30 +217,35 @@ const insets = useSafeAreaInsets();
         </Animated.View>
 
         <TouchableOpacity
-          onPress={() => {
-            if (countdown === 0) setCountdown(30);
-          }}
-          disabled={countdown > 0}
+          onPress={handleResend}
+          disabled={countdown > 0 || sendOtpMutation.isPending}
         >
           <Text style={[styles.resend, countdown === 0 && styles.resendActive]}>
-            {countdown > 0 ? `Resend in ${countdown}` : "Resend code"}
+            {sendOtpMutation.isPending
+              ? "Sending..."
+              : countdown > 0
+                ? `Resend in ${countdown}s`
+                : "Resend code"}
           </Text>
         </TouchableOpacity>
 
         <View style={styles.divider} />
-
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.differentMethod}>Try a different method</Text>
         </TouchableOpacity>
-
         <View style={{ flex: 1 }} />
 
         <TouchableOpacity
-          style={styles.button}
+          style={[styles.button, verifyMutation.isPending && { opacity: 0.7 }]}
           activeOpacity={0.82}
           onPress={handleContinue}
+          disabled={verifyMutation.isPending}
         >
-          <Text style={styles.buttonText}>Continue</Text>
+          {verifyMutation.isPending ? (
+            <ActivityIndicator color="#161616" />
+          ) : (
+            <Text style={styles.buttonText}>Continue</Text>
+          )}
         </TouchableOpacity>
       </Animated.View>
     </KeyboardAvoidingView>
@@ -208,14 +254,13 @@ const insets = useSafeAreaInsets();
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white },
-
   heroSection: {
     height: HERO_HEIGHT,
     backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "flex-end",
     overflow: "hidden",
-     marginHorizontal: 20,
+    marginHorizontal: 20,
     marginBottom: 30,
     borderRadius: Radius.md,
   },
@@ -229,17 +274,12 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   illustrationWrap: {
-    width: width,
+    width,
     height: HERO_HEIGHT,
     alignItems: "center",
     justifyContent: "flex-end",
-
   },
-  illustration: {
-    width: width * 0.52,
-    height: HERO_HEIGHT * 0.88,
-  },
-
+  illustration: { width: width * 0.52, height: HERO_HEIGHT * 0.88 },
   contentSection: {
     flex: 1,
     paddingHorizontal: 24,
@@ -261,7 +301,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 24,
   },
-
   otpRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -278,29 +317,20 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins-Bold",
     color: "#0F1F3D",
   },
-  otpBoxFilled: {
-    backgroundColor: "#F2F2F2",
-  },
-
+  otpBoxFilled: { backgroundColor: "#F2F2F2" },
   resend: {
     fontFamily: "Poppins-SemiBold",
     fontSize: 14,
-    color: Colors.primary,
+    color: "#AAAAAA",
     marginBottom: 20,
   },
   resendActive: { color: Colors.primary },
-
-  divider: {
-    height: 1,
-    backgroundColor: "#E5E5E5",
-    marginBottom: 16,
-  },
+  divider: { height: 1, backgroundColor: "#E5E5E5", marginBottom: 16 },
   differentMethod: {
     fontFamily: "Poppins-SemiBold",
     fontSize: 14,
     color: Colors.primary,
   },
-
   button: {
     backgroundColor: Colors.primary,
     borderRadius: Radius.md,

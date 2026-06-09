@@ -1,17 +1,13 @@
 /**
- * DeliveryDetailsScreen
- *
- * Fonts:
- *  - Section labels / bold headings → HelveticaNeue-CondensedBold (or Helvetica-BoldCondensed)
- *  - Body, labels, inputs → Poppins-Regular / Poppins-SemiBold / Poppins-Bold
- *
- * SVG assets used (replace filenames as needed):
- *  - close_x.svg         → X close icon (header)
- *  - pin_location.svg    → Location pin icon (pickup / dropoff fields)
- *  - map_person.svg      → Map person / pedestrian icon (dropoff field right side)
- *
- * Images used:
- *  - (none on this screen)
+ * DeliveryDetailsScreen.tsx (fixed + functional)
+ * ─────────────────────────────────────────────────────────
+ * Key fixes:
+ *   ✅ Uses toast instead of Alert for validation errors
+ *   ✅ Item type validation with inline error state
+ *   ✅ Radio buttons show filled circle correctly
+ *   ✅ pickupCoords / dropoffCoords forwarded to SelectVehicle
+ *   ✅ Scheduled badge shown when isScheduled=true
+ *   ✅ Character counter on special instructions
  */
 
 import React, { useRef, useEffect, useState } from "react";
@@ -32,28 +28,14 @@ import { DeliveryStackParamList } from "../../navigation/types";
 import MapSvg from "../../assets/icons/map_pin_person.svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
+import { useToast } from "../../components/common/Toast";
 
 const { width } = Dimensions.get("window");
 
-// ─── Inline SVGs (replace with your file imports once assets are ready) ──────
-
-const closeSvg = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M1 1L17 17M17 1L1 17" stroke="#1A1A2E" stroke-width="2" stroke-linecap="round"/>
-</svg>`;
-
+// ─── Inline SVGs ──────────────────────────────────────────────────────────────
 const pinSvg = `<svg width="18" height="22" viewBox="0 0 18 22" fill="none" xmlns="http://www.w3.org/2000/svg">
   <path d="M9 0C4.03 0 0 4.03 0 9C0 15.75 9 22 9 22C9 22 18 15.75 18 9C18 4.03 13.97 0 9 0ZM9 12C7.34 12 6 10.66 6 9C6 7.34 7.34 6 9 6C10.66 6 12 7.34 12 9C12 10.66 10.66 12 9 12Z" fill="#0B1F3A"/>
 </svg>`;
-
-const mapPersonSvg = `<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="14" cy="14" r="14" fill="#E8EEF4"/>
-  <path d="M14 6C15.1 6 16 6.9 16 8C16 9.1 15.1 10 14 10C12.9 10 12 9.1 12 8C12 6.9 12.9 6 14 6Z" fill="#0B1F3A"/>
-  <path d="M14 11C11.8 11 10 12.8 10 15V16H12V22H16V16H18V15C18 12.8 16.2 11 14 11Z" fill="#0B1F3A"/>
-  <circle cx="20" cy="20" r="4" fill="#3B9EFF" opacity="0.85"/>
-  <path d="M19 20L20.5 21.5L22 19" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>`;
-
-const mapSvg = ``;
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const Colors = {
@@ -67,33 +49,52 @@ const Colors = {
   textMuted: "#9CA3AF",
   placeholder: "#B0B8C4",
   sectionLabel: "#0B1F3A",
+  error: "#EF4444",
+  errorBg: "#FEF2F2",
+  scheduled: "#0B3C5D",
+  scheduledBg: "#E8F4FF",
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type RouteParams = RouteProp<DeliveryStackParamList, "DeliveryDetails">;
 type WeightCategory = "lightweight" | "standard" | "heavy";
 
-const WEIGHT_OPTIONS: { key: WeightCategory; label: string }[] = [
-  { key: "lightweight", label: "Light weight" },
-  { key: "standard", label: "Standard" },
-  { key: "heavy", label: "Heavy" },
+const WEIGHT_OPTIONS: {
+  key: WeightCategory;
+  label: string;
+  sublabel: string;
+}[] = [
+  { key: "lightweight", label: "Lightweight", sublabel: "< 2 kg" },
+  { key: "standard", label: "Standard", sublabel: "2–10 kg" },
+  { key: "heavy", label: "Heavy", sublabel: "> 10 kg" },
 ];
+
+const MAX_INSTRUCTIONS = 200;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function DeliveryDetailsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
-  const { pickup = "American House", dropoff = "University of Ghana" } =
-    route.params ?? {};
+  const toast = useToast();
+
+  const {
+    pickup = "Pickup location",
+    dropoff = "Dropoff location",
+    pickupCoords,
+    dropoffCoords,
+    isScheduled,
+    scheduledTime,
+  } = route.params ?? {};
 
   const [itemType, setItemType] = useState("");
   const [weight, setWeight] = useState<WeightCategory>("lightweight");
   const [instructions, setInstructions] = useState("");
-
-  const canProceed = itemType.trim().length > 0;
+  const [itemTypeError, setItemTypeError] = useState(false);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(18)).current;
+  // Shake animation for error
+  const shakeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -111,13 +112,54 @@ export default function DeliveryDetailsScreen() {
     ]).start();
   }, []);
 
+  const shakeItemType = () => {
+    Animated.sequence([
+      Animated.timing(shakeAnim, {
+        toValue: 8,
+        duration: 55,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeAnim, {
+        toValue: -8,
+        duration: 55,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeAnim, {
+        toValue: 5,
+        duration: 55,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeAnim, {
+        toValue: -5,
+        duration: 55,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeAnim, {
+        toValue: 0,
+        duration: 55,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
   const handleContinue = () => {
+    if (!itemType.trim()) {
+      setItemTypeError(true);
+      shakeItemType();
+      toast.error("Please describe the item you're sending.");
+      return;
+    }
+
     navigation.navigate("SelectVehicle", {
       pickup,
       dropoff,
-      itemType,
+      pickupCoords,
+      dropoffCoords,
+      itemType: itemType.trim(),
       weight,
-      specialInstructions: instructions,
+      specialInstructions: instructions.trim(),
+      isScheduled,
+      scheduledTime,
     });
   };
 
@@ -149,10 +191,19 @@ export default function DeliveryDetailsScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.scrollContent}
         >
+          {/* ── Scheduled badge ── */}
+          {isScheduled && scheduledTime && (
+            <View style={styles.scheduledBadge}>
+              <Text style={styles.scheduledIcon}>🗓</Text>
+              <Text style={styles.scheduledText}>
+                Scheduled: {scheduledTime}
+              </Text>
+            </View>
+          )}
+
           {/* ── Route Section ── */}
           <SectionLabel label="Route" />
 
-          {/* Pick-up */}
           <Text style={styles.fieldLabel}>Pick-up</Text>
           <View style={styles.readOnlyInput}>
             <SvgXml
@@ -161,10 +212,11 @@ export default function DeliveryDetailsScreen() {
               height={20}
               style={styles.pinIcon}
             />
-            <Text style={styles.readOnlyText}>{pickup}</Text>
+            <Text style={styles.readOnlyText} numberOfLines={1}>
+              {pickup}
+            </Text>
           </View>
 
-          {/* Drop-off */}
           <Text style={styles.fieldLabel}>Drop-off</Text>
           <View style={styles.readOnlyInput}>
             <SvgXml
@@ -173,8 +225,9 @@ export default function DeliveryDetailsScreen() {
               height={20}
               style={styles.pinIcon}
             />
-            <Text style={styles.readOnlyText}>{dropoff}</Text>
-            {/* <SvgXml xml={mapPersonSvg} width={34} height={34} /> */}
+            <Text style={styles.readOnlyText} numberOfLines={1}>
+              {dropoff}
+            </Text>
             <MapSvg width={30} height={26} />
           </View>
 
@@ -183,53 +236,81 @@ export default function DeliveryDetailsScreen() {
           <SectionLabel label="Package Details" />
 
           {/* Item Type */}
-          <Text style={styles.fieldLabel}>Item type</Text>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Describe item"
-            placeholderTextColor={Colors.placeholder}
-            value={itemType}
-            onChangeText={setItemType}
-          />
+          <Text style={styles.fieldLabel}>
+            Item type <Text style={styles.requiredStar}>*</Text>
+          </Text>
+          <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
+            <TextInput
+              style={[styles.textInput, itemTypeError && styles.textInputError]}
+              placeholder="e.g. Documents, Electronics, Clothing…"
+              placeholderTextColor={Colors.placeholder}
+              value={itemType}
+              onChangeText={(v) => {
+                setItemType(v);
+                if (v.trim()) setItemTypeError(false);
+              }}
+              returnKeyType="next"
+            />
+          </Animated.View>
+          {itemTypeError && (
+            <Text style={styles.errorHint}>
+              Please describe what you're sending.
+            </Text>
+          )}
 
           {/* Weight Category */}
-          <Text style={styles.fieldLabel}>Weight category</Text>
-          <View style={styles.radioRow}>
-            {WEIGHT_OPTIONS.map((opt) => (
-              <TouchableOpacity
-                key={opt.key}
-                style={styles.radioOption}
-                onPress={() => setWeight(opt.key)}
-                activeOpacity={0.7}
-              >
-                <View
-                  style={[
-                    styles.radioOuter,
-                    weight === opt.key && styles.radioOuterActive,
-                  ]}
+          <Text style={[styles.fieldLabel, { marginTop: 4 }]}>
+            Weight category
+          </Text>
+          <View style={styles.weightGrid}>
+            {WEIGHT_OPTIONS.map((opt) => {
+              const active = weight === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.weightCard, active && styles.weightCardActive]}
+                  onPress={() => setWeight(opt.key)}
+                  activeOpacity={0.7}
                 >
-                  {weight === opt.key && <View style={styles.radioInner} />}
-                </View>
-                <Text
-                  style={[
-                    styles.radioLabel,
-                    weight === opt.key && styles.radioLabelActive,
-                  ]}
-                >
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <View
+                    style={[
+                      styles.radioOuter,
+                      active && styles.radioOuterActive,
+                    ]}
+                  >
+                    {active && <View style={styles.radioInner} />}
+                  </View>
+                  <View style={styles.weightTextWrap}>
+                    <Text
+                      style={[
+                        styles.weightLabel,
+                        active && styles.weightLabelActive,
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                    <Text style={styles.weightSublabel}>{opt.sublabel}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Special Instructions */}
-          <Text style={styles.fieldLabel}>Special instructions</Text>
+          <View style={styles.instructionsHeader}>
+            <Text style={styles.fieldLabel}>Special instructions</Text>
+            <Text style={styles.charCount}>
+              {instructions.length}/{MAX_INSTRUCTIONS}
+            </Text>
+          </View>
           <TextInput
             style={styles.textArea}
-            placeholder="Type here.."
+            placeholder="Handle with care, call before delivery, leave at door…"
             placeholderTextColor={Colors.placeholder}
             value={instructions}
-            onChangeText={setInstructions}
+            onChangeText={(v) => {
+              if (v.length <= MAX_INSTRUCTIONS) setInstructions(v);
+            }}
             multiline
             numberOfLines={4}
             textAlignVertical="top"
@@ -241,23 +322,19 @@ export default function DeliveryDetailsScreen() {
         {/* ── Continue Button ── */}
         <View style={styles.footer}>
           <TouchableOpacity
-            style={[styles.continueBtn, !canProceed && { opacity: 0.5 }]}
+            style={styles.continueBtn}
             onPress={handleContinue}
-            disabled={!canProceed}
             activeOpacity={0.85}
           >
             <Text style={styles.continueBtnText}>Continue</Text>
           </TouchableOpacity>
         </View>
       </Animated.View>
-
-      {/* ── Bottom Tab Bar ── */}
-      {/* <BottomTabBar /> */}
     </SafeAreaView>
   );
 }
 
-// ─── Section Label ─────────────────────────────────────────────────────────────
+// ─── Section Label ────────────────────────────────────────────────────────────
 function SectionLabel({ label }: { label: string }) {
   return (
     <View style={sectionStyles.wrap}>
@@ -266,57 +343,6 @@ function SectionLabel({ label }: { label: string }) {
     </View>
   );
 }
-
-// ─── Bottom Tab Bar ────────────────────────────────────────────────────────────
-/**
- * SVG assets for tab bar:
- *  - tab_home.svg    → house/home icon (active)
- *  - tab_send.svg    → paper-plane / send icon
- *  - tab_profile.svg → person/user icon
- */
-// function BottomTabBar() {
-//   const homeSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-//     <path d="M3 12L12 3L21 12V21H15V15H9V21H3V12Z" stroke="#1A1A2E" stroke-width="1.5" stroke-linejoin="round"/>
-//   </svg>`;
-//   const sendSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-//     <path d="M22 2L11 13" stroke="#9CA3AF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-//     <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="#9CA3AF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-//   </svg>`;
-//   const profileSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-//     <circle cx="12" cy="8" r="4" stroke="#9CA3AF" stroke-width="1.5"/>
-//     <path d="M4 20C4 17.8 7.6 16 12 16C16.4 16 20 17.8 20 20" stroke="#9CA3AF" stroke-width="1.5" stroke-linecap="round"/>
-//   </svg>`;
-
-//   return (
-//     <View style={tabStyles.bar}>
-//       <TouchableOpacity style={tabStyles.tab} activeOpacity={0.7}>
-//         <SvgXml xml={homeSvg} width={24} height={24} />
-//       </TouchableOpacity>
-//       <TouchableOpacity style={tabStyles.tab} activeOpacity={0.7}>
-//         <SvgXml xml={sendSvg} width={24} height={24} />
-//       </TouchableOpacity>
-//       <TouchableOpacity style={tabStyles.tab} activeOpacity={0.7}>
-//         <SvgXml xml={profileSvg} width={24} height={24} />
-//       </TouchableOpacity>
-//     </View>
-//   );
-// }
-
-const tabStyles = StyleSheet.create({
-  bar: {
-    flexDirection: "row",
-    borderTopWidth: 1,
-    borderTopColor: "#F0F2F5",
-    backgroundColor: Colors.white,
-    paddingBottom: 8,
-    paddingTop: 10,
-  },
-  tab: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
 
 const sectionStyles = StyleSheet.create({
   wrap: {
@@ -339,12 +365,8 @@ const sectionStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.white,
-  },
+  safeArea: { flex: 1, backgroundColor: Colors.white },
 
-  // Header
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -366,16 +388,27 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     letterSpacing: 0.2,
   },
-  headerSpacer: {
-    width: 32,
-  },
+  headerSpacer: { width: 32 },
 
-  content: {
-    flex: 1,
+  content: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 8 },
+
+  // Scheduled badge
+  scheduledBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.scheduledBg,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 16,
+    gap: 8,
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
+  scheduledIcon: { fontSize: 16 },
+  scheduledText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 13,
+    color: Colors.scheduled,
   },
 
   fieldLabel: {
@@ -384,6 +417,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginBottom: 8,
   },
+  requiredStar: { color: Colors.error },
 
   readOnlyInput: {
     flexDirection: "row",
@@ -395,9 +429,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     minHeight: 52,
   },
-  pinIcon: {
-    marginRight: 10,
-  },
+  pinIcon: { marginRight: 10 },
   readOnlyText: {
     flex: 1,
     fontFamily: "Poppins-Regular",
@@ -413,28 +445,51 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins-Regular",
     fontSize: 14,
     color: Colors.textPrimary,
-    marginBottom: 14,
+    marginBottom: 6,
     minHeight: 52,
+    borderWidth: 1.5,
+    borderColor: "transparent",
+  },
+  textInputError: {
+    borderColor: Colors.error,
+    backgroundColor: Colors.errorBg,
+  },
+  errorHint: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 12,
+    color: Colors.error,
+    marginBottom: 10,
+    marginLeft: 4,
   },
 
-  radioRow: {
+  // Weight grid: 3 cards side by side
+  weightGrid: {
     flexDirection: "row",
-    gap: 20,
+    gap: 10,
     marginBottom: 18,
-    flexWrap: "wrap",
-    alignItems: "center",
   },
-  radioOption: {
-    flexDirection: "row",
+  weightCard: {
+    flex: 1,
+    flexDirection: "column",
     alignItems: "center",
-    gap: 7,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "transparent",
+    gap: 6,
+  },
+  weightCardActive: {
+    borderColor: Colors.navy,
+    backgroundColor: Colors.white,
   },
   radioOuter: {
-    width: 19,
-    height: 19,
-    borderRadius: 9.5,
-    // borderWidth: 1.5,
-    // borderColor: "#C0C8D4",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#C0C8D4",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -442,21 +497,39 @@ const styles = StyleSheet.create({
     borderColor: Colors.navy,
   },
   radioInner: {
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: Colors.navy,
   },
-  radioLabel: {
+  weightTextWrap: { alignItems: "center" },
+  weightLabel: {
     fontFamily: "Poppins-Regular",
-    fontSize: 13,
+    fontSize: 12,
     color: Colors.textSecondary,
+    textAlign: "center",
   },
-  radioLabelActive: {
+  weightLabelActive: {
     fontFamily: "Poppins-SemiBold",
     color: Colors.textPrimary,
   },
+  weightSublabel: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 11,
+    color: Colors.textMuted,
+  },
 
+  instructionsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  charCount: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 12,
+    color: Colors.textMuted,
+  },
   textArea: {
     backgroundColor: Colors.inputBg,
     borderRadius: 12,
@@ -470,9 +543,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
 
-  sectionGap: {
-    height: 10,
-  },
+  sectionGap: { height: 10 },
 
   footer: {
     position: "absolute",
@@ -483,6 +554,8 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingTop: 8,
     backgroundColor: Colors.white,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
   },
   continueBtn: {
     backgroundColor: Colors.primary,

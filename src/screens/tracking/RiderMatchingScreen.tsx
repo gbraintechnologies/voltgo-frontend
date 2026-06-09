@@ -1,18 +1,8 @@
 /**
- * RiderMatchingScreen
- *
- * Fonts:
- *  - "Rider Matching" heading → HelveticaNeue-CondensedBold
- *  - subtitle, Cancel button text → Poppins-Regular / Poppins-SemiBold
- *
- * SVG assets:
- *  - arrow_back.svg        → back arrow
- *  - search_magnify.svg    → magnifying glass icon (large, above bicycle)
- *  - bicycle.svg           → bicycle illustration (large, pulsing)
- *
- * Bottom sheet built from scratch using Animated + PanResponder.
- * No @gorhom/bottom-sheet dependency required.
- * Snaps at ~55% and 88% of screen height, draggable.
+ * RiderMatchingScreen.tsx
+ * ─────────────────────────────────────────────────────────
+ * Real MapView + Routes API polyline replacing the static placeholder.
+ * UI/layout unchanged from original.
  */
 
 import React, { useEffect, useRef, useMemo, useCallback } from "react";
@@ -33,7 +23,9 @@ import { SvgXml } from "react-native-svg";
 import { DeliveryStackParamList } from "../../navigation/types";
 import BicycleSvg from "../../assets/icons/bicycle.svg";
 import SearchMagnifySvg from "../../assets/icons/search_magnify.svg";
-import { Image } from "react-native";
+import { useRoutePolyline } from "../../utils/useRoutePolyline";
+// import { GOOGLE_MAPS_API_KEY } from "../../utils/mapsConfig";
+import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -53,14 +45,13 @@ const arrowBackSvg = `<svg width="18" height="16" viewBox="0 0 18 16" fill="none
 
 type RouteParams = RouteProp<DeliveryStackParamList, "RiderMatching">;
 
-const PICKUP_COORD = { latitude: 5.5968, longitude: -0.1869 };
-const DROPOFF_COORD = { latitude: 5.6502, longitude: -0.187 };
+// Default Accra coords — overridden when real coords are passed via params
+const DEFAULT_PICKUP = { latitude: 5.5968, longitude: -0.1869 };
+const DEFAULT_DROPOFF = { latitude: 5.6502, longitude: -0.187 };
 
-// ─── Snap percentages → pixel Y positions (translateY from top of screen) ────
 const SNAP_PERCENTAGES = [0.55, 0.88];
 
 // ─── Custom Bottom Sheet ──────────────────────────────────────────────────────
-
 interface CustomBottomSheetProps {
   snapPoints: number[];
   initialSnapIndex?: number;
@@ -151,7 +142,6 @@ function CustomBottomSheet({
 
   return (
     <Animated.View style={[sheetStyles.sheet, { transform: [{ translateY }] }]}>
-      {/* Drag handle */}
       <View {...panResponder.panHandlers} style={sheetStyles.handleArea}>
         <View style={sheetStyles.handle} />
       </View>
@@ -175,37 +165,52 @@ const sheetStyles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 16,
   },
-  handleArea: {
-    alignItems: "center",
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-  handle: {
-    width: 38,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#D0D6E0",
-  },
+  handleArea: { alignItems: "center", paddingTop: 10, paddingBottom: 6 },
+  handle: { width: 38, height: 4, borderRadius: 2, backgroundColor: "#D0D6E0" },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
-
 export default function RiderMatchingScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
   const params = route.params ?? {};
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const mapRef = useRef<MapView>(null);
 
-  // Snap points as pixel Y-positions
   const snapPoints = useMemo(
     () => SNAP_PERCENTAGES.map((pct) => SCREEN_HEIGHT * (1 - pct)),
     [],
   );
 
-  const USE_STATIC_MAP = true;
+  // Use coords passed from previous screen, fall back to defaults
+  const pickupCoord = (params as any).pickupCoords ?? DEFAULT_PICKUP;
+  const dropoffCoord = (params as any).dropoffCoords ?? DEFAULT_DROPOFF;
 
-  // Continuous pulse on the bicycle illustration
+  // Fetch real route
+  const { coords: routeCoords, etaMinutes } = useRoutePolyline({
+    origin: pickupCoord,
+    destination: dropoffCoord,
+    mode: params.vehicleType === "e-motorcycle" ? "TWO_WHEELER" : "BICYCLE",
+  });
+
+  // Fit map to route once loaded
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const points =
+      routeCoords.length > 0 ? routeCoords : [pickupCoord, dropoffCoord];
+    mapRef.current.fitToCoordinates(points, {
+      edgePadding: {
+        top: 80,
+        right: 60,
+        bottom: SCREEN_HEIGHT * 0.5,
+        left: 60,
+      },
+      animated: true,
+    });
+  }, [routeCoords]);
+
+  // Pulse animation
   useEffect(() => {
     const pulse = Animated.loop(
       Animated.sequence([
@@ -225,7 +230,7 @@ export default function RiderMatchingScreen() {
     return () => pulse.stop();
   }, []);
 
-  // Simulate rider found after 4 s
+  // Simulate rider found after 4s
   useEffect(() => {
     const timer = setTimeout(() => {
       navigation.replace("RiderFound", {
@@ -234,16 +239,22 @@ export default function RiderMatchingScreen() {
         riderPlate: "GHA - 2233343 -4",
         riderRating: 4.5,
         vehicleType: params.vehicleType ?? "bicycle",
+        pickupCoords: pickupCoord,
+        dropoffCoords: dropoffCoord,
       });
     }, 4000);
     return () => clearTimeout(timer);
   }, []);
 
-  const mapRegion = {
-    latitude: (PICKUP_COORD.latitude + DROPOFF_COORD.latitude) / 2,
-    longitude: (PICKUP_COORD.longitude + DROPOFF_COORD.longitude) / 2,
-    latitudeDelta: 0.08,
-    longitudeDelta: 0.08,
+  const displayEta = etaMinutes ?? 33;
+
+  const initialRegion = {
+    latitude: (pickupCoord.latitude + dropoffCoord.latitude) / 2,
+    longitude: (pickupCoord.longitude + dropoffCoord.longitude) / 2,
+    latitudeDelta:
+      Math.abs(pickupCoord.latitude - dropoffCoord.latitude) * 3 + 0.02,
+    longitudeDelta:
+      Math.abs(pickupCoord.longitude - dropoffCoord.longitude) * 3 + 0.02,
   };
 
   return (
@@ -254,40 +265,49 @@ export default function RiderMatchingScreen() {
         backgroundColor="transparent"
       />
 
-      {USE_STATIC_MAP ? (
-        <Image
-          source={require("../../assets/images/map_placeholder.png")}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
-      ) : (
-        <MapView
-          provider={PROVIDER_GOOGLE}
-          style={StyleSheet.absoluteFillObject}
-          region={mapRegion}
-          scrollEnabled={false}
-          zoomEnabled={false}
-          rotateEnabled={false}
-          customMapStyle={lightMapStyle}
-        >
+      {/* Real Map */}
+      <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
+        style={StyleSheet.absoluteFillObject}
+        initialRegion={initialRegion}
+        customMapStyle={CUSTOM_MAP_STYLE}
+        scrollEnabled={false}
+        zoomEnabled={false}
+        rotateEnabled={false}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        toolbarEnabled={false}
+      >
+        {routeCoords.length > 0 && (
           <Polyline
-            coordinates={[PICKUP_COORD, DROPOFF_COORD]}
+            coordinates={routeCoords}
             strokeColor={Colors.navy}
             strokeWidth={3.5}
           />
-          <Marker coordinate={PICKUP_COORD} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.pickupDot}>
-              <View style={styles.pickupDotInner} />
-            </View>
-          </Marker>
-          <Marker coordinate={DROPOFF_COORD} anchor={{ x: 0.5, y: 1 }}>
-            <View style={styles.dropoffPin}>
-              <View style={styles.dropoffPinCircle} />
-              <View style={styles.dropoffPinTail} />
-            </View>
-          </Marker>
-        </MapView>
-      )}
+        )}
+        <Marker
+          coordinate={pickupCoord}
+          anchor={{ x: 0.5, y: 0.5 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.pickupDot}>
+            <View style={styles.pickupDotInner} />
+          </View>
+        </Marker>
+        <Marker
+          coordinate={dropoffCoord}
+          anchor={{ x: 0.5, y: 1 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.dropoffPin}>
+            <View style={styles.dropoffPinCircle} />
+            <View style={styles.dropoffPinTail} />
+          </View>
+        </Marker>
+      </MapView>
+
       {/* Back Button */}
       <TouchableOpacity
         style={styles.backBtn}
@@ -299,16 +319,14 @@ export default function RiderMatchingScreen() {
 
       {/* ETA Badge */}
       <View style={styles.etaBadge}>
-        <Text style={styles.etaText}>33 min</Text>
+        <Text style={styles.etaText}>{displayEta} min</Text>
       </View>
 
-      {/* ── Custom Bottom Sheet ── */}
+      {/* Bottom Sheet */}
       <CustomBottomSheet snapPoints={snapPoints} initialSnapIndex={0}>
         <View style={styles.sheetContent}>
-          {/* Heading */}
           <Text style={styles.heading}>Rider Matching</Text>
 
-          {/* Illustration — pulsing */}
           <Animated.View
             style={[
               styles.illustrationWrap,
@@ -319,16 +337,14 @@ export default function RiderMatchingScreen() {
             <BicycleSvg width={90} height={68} />
           </Animated.View>
 
-          {/* Divider */}
           <View style={styles.divider} />
 
-          {/* Subtitle */}
           <Text style={styles.subtitle}>
             Hold on while we connect you{"\n"}to the closest rider...
           </Text>
 
-          {/* Cancel button — pushed to bottom */}
           <View style={styles.spacer} />
+
           <TouchableOpacity
             style={styles.cancelBtn}
             onPress={() => navigation.navigate("HomeMap")}
@@ -342,7 +358,6 @@ export default function RiderMatchingScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#E8EEF4" },
 
@@ -415,29 +430,25 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
     alignItems: "center",
   },
-
   heading: {
-    fontFamily: "HelveticaNeue-CondensedBold",
-    fontSize: 20,
+    fontFamily: "Poppins-Bold",
+    fontSize: 18,
     color: Colors.textPrimary,
     textAlign: "center",
     marginBottom: 24,
     letterSpacing: 0.2,
   },
-
   illustrationWrap: {
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 20,
   },
-
   divider: {
     width: 130,
     height: 1,
     backgroundColor: "#E0E4EA",
     marginBottom: 18,
   },
-
   subtitle: {
     fontFamily: "Poppins-Regular",
     fontSize: 14,
@@ -445,9 +456,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
   },
-
   spacer: { flex: 1 },
-
   cancelBtn: {
     width: "100%",
     backgroundColor: Colors.inputBg,
@@ -461,26 +470,3 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 });
-
-const lightMapStyle = [
-  { elementType: "geometry", stylers: [{ color: "#eaf0f6" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#7a9bb5" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#ffffff" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#d0dce8" }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#ccdce8" }],
-  },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-];

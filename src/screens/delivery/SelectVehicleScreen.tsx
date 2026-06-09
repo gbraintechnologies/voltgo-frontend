@@ -1,25 +1,9 @@
 /**
- * SelectVehicleScreen
- *
- * Custom bottom sheet — zero third-party dependencies.
- * Uses React Native's Animated + PanResponder for smooth
- * drag-to-expand / drag-to-collapse UX identical to @gorhom/bottom-sheet.
- *
- * Fonts:
- *  - "Select Vehicle Type" heading, vehicle names, prices, button text → HelveticaNeue-CondensedBold
- *  - Description, ETA, labels, Bundle Credits text → Poppins-Regular / Poppins-SemiBold
- *
- * SVG assets (imported from your assets folder):
- *  - arrow_back.svg
- *  - bicycle.svg
- *  - emoto.svg
- *  - bundle_credits.svg
- *  - chevron_right.svg
- *
- * Dependencies needed:
- *  - react-native-maps
- *  - react-native-svg  (SvgXml)
- *  NO @gorhom/bottom-sheet needed
+ * SelectVehicleScreen.tsx
+ * ─────────────────────────────────────────────────────────
+ * Real MapView + Routes API polyline. ETA badge updates
+ * automatically based on the selected vehicle mode.
+ * UI/layout unchanged from original.
  */
 
 import React, {
@@ -40,7 +24,6 @@ import {
   Animated,
   PanResponder,
   ScrollView,
-  LayoutChangeEvent,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -50,75 +33,73 @@ import EmotoSvg from "../../assets/icons/emoto.svg";
 import BicycleSvg from "../../assets/icons/bicycle.svg";
 import ChevronRightSvg from "../../assets/icons/chevron_right.svg";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
-import { Image } from "react-native";
+import { useRoutePolyline, TravelMode } from "../../utils/useRoutePolyline";
+import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
-// ─── Theme ────────────────────────────────────────────────────────────────────
 const Colors = {
   white: "#FFFFFF",
   navy: "#0B1F3A",
   primary: "#4CD964",
-  // inputBg: "#F2F4F7",
   inputBg: "#eeeeee",
   border: "#E0E4EA",
   textPrimary: "#1A1A2E",
   textSecondary: "#6B7280",
   textMuted: "#9CA3AF",
   cardBorder: "#D1D8E4",
-  bundleBg: "#E8F4FF",
-  bundleIcon: "#000000ff",
 };
 
-// ─── Bottom sheet snap points (% of screen height) ───────────────────────────
-const SNAP_COLLAPSED = 0.50;
+const SNAP_COLLAPSED = 0.5;
 const SNAP_EXPANDED = 0.65;
-const SNAP_FULL = 0.70; // ← new: nearly full screen
+const SNAP_FULL = 0.7;
 
 const COLLAPSED_H = SCREEN_H * SNAP_COLLAPSED;
 const EXPANDED_H = SCREEN_H * SNAP_EXPANDED;
 const FULL_H = SCREEN_H * SNAP_FULL;
-
-// How much drag before snapping to the other position
 const SNAP_THRESHOLD = 60;
-// Velocity threshold — fast flick snaps regardless of distance
 const VELOCITY_THRESHOLD = 0.5;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 type RouteParams = RouteProp<DeliveryStackParamList, "SelectVehicle">;
 type VehicleType = "bicycle" | "e-motorcycle";
 
-const VEHICLES = [
+const VEHICLES: {
+  id: VehicleType;
+  name: string;
+  description: string;
+  price: number;
+  mode: TravelMode;
+  Icon: any;
+  svgW: number;
+  svgH: number;
+}[] = [
   {
-    id: "bicycle" as VehicleType,
+    id: "bicycle",
     name: "Bicycle",
     description: "Lightweight, short distance",
     price: 24,
-    eta: "6 min",
+    mode: "BICYCLE",
     Icon: BicycleSvg,
     svgW: 64,
     svgH: 48,
   },
   {
-    id: "e-motorcycle" as VehicleType,
+    id: "e-motorcycle",
     name: "E-Motorcycle",
     description: "Standard/Heavy, Longer distance",
     price: 44,
-    eta: "10 min",
+    mode: "TWO_WHEELER",
     Icon: EmotoSvg,
     svgW: 68,
     svgH: 48,
   },
 ];
 
-// Accra coordinates for the demo route
-const PICKUP_COORD = { latitude: 5.5968, longitude: -0.1869 };
-const DROPOFF_COORD = { latitude: 5.6502, longitude: -0.187 };
+const DEFAULT_PICKUP = { latitude: 5.5968, longitude: -0.1869 };
+const DEFAULT_DROPOFF = { latitude: 5.6502, longitude: -0.187 };
 
-// ─── Custom Bottom Sheet Hook ─────────────────────────────────────────────────
 function useCustomBottomSheet() {
   const initialOffset = SCREEN_H - COLLAPSED_H;
-
   const translateY = useRef(new Animated.Value(initialOffset)).current;
   const lastTranslateY = useRef(initialOffset);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -141,7 +122,6 @@ function useCustomBottomSheet() {
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 5,
-
       onPanResponderGrant: () => {
         translateY.stopAnimation((currentValue) => {
           lastTranslateY.current = currentValue;
@@ -149,16 +129,11 @@ function useCustomBottomSheet() {
           translateY.setValue(0);
         });
       },
-
       onPanResponderMove: (_, gs) => {
-        // gs.dy is relative delta from grant point
-        // offset is already set to lastTranslateY, so just clamp gs.dy
-        const minDelta = SCREEN_H - FULL_H - lastTranslateY.current; // how far up we can go
-        const maxDelta = SCREEN_H - COLLAPSED_H + 40 - lastTranslateY.current; // how far down
-        const clamped = Math.min(maxDelta, Math.max(minDelta, gs.dy));
-        translateY.setValue(clamped);
+        const minDelta = SCREEN_H - FULL_H - lastTranslateY.current;
+        const maxDelta = SCREEN_H - COLLAPSED_H + 40 - lastTranslateY.current;
+        translateY.setValue(Math.min(maxDelta, Math.max(minDelta, gs.dy)));
       },
-
       onPanResponderRelease: (_, gs) => {
         translateY.flattenOffset();
         const current = lastTranslateY.current + gs.dy;
@@ -191,38 +166,90 @@ function useCustomBottomSheet() {
   return { translateY, panResponder, isExpanded };
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function SelectVehicleScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
-  const { pickup = "American House", dropoff = "University of Ghana" } =
-    route.params ?? {};
-
-  const USE_STATIC_MAP = true;
+  const mapRef = useRef<MapView>(null);
 
   const [selected, setSelected] = useState<VehicleType>("bicycle");
   const { translateY, panResponder, isExpanded } = useCustomBottomSheet();
 
+  const { pickup, dropoff, isScheduled, scheduledTime } = route.params ?? {};
+
+  const pickupCoord = (route.params as any)?.pickupCoords ?? DEFAULT_PICKUP;
+  const dropoffCoord = (route.params as any)?.dropoffCoords ?? DEFAULT_DROPOFF;
+
   const selectedVehicle = VEHICLES.find((v) => v.id === selected)!;
 
-  const handleContinue = () => {
-    navigation.navigate("ReviewDelivery", {
-      pickup,
-      dropoff,
-      itemType: route.params?.itemType ?? "",
-      weight: route.params?.weight ?? "lightweight",
-      specialInstructions: route.params?.specialInstructions,
-      vehicleType: selected,
-      price: selectedVehicle.price,
-      paymentMethod: "Bundle Credits",
+  // Fetch route for selected vehicle mode — re-fetches when selection changes
+  const {
+    coords: routeCoords,
+    etaMinutes,
+    loading,
+  } = useRoutePolyline({
+    origin: pickupCoord,
+    destination: dropoffCoord,
+    mode: selectedVehicle.mode,
+  });
+
+  // Fit map whenever route updates
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const points =
+      routeCoords.length > 0 ? routeCoords : [pickupCoord, dropoffCoord];
+    mapRef.current.fitToCoordinates(points, {
+      edgePadding: { top: 60, right: 60, bottom: SCREEN_H * 0.58, left: 60 },
+      animated: true,
     });
+  }, [routeCoords]);
+
+  const displayEta = etaMinutes
+    ? `${etaMinutes} min`
+    : loading
+      ? "..."
+      : selectedVehicle.id === "bicycle"
+        ? "6 min"
+        : "10 min";
+
+  const handleContinue = () => {
+    if (isScheduled) {
+      navigation.navigate("ReviewDelivery", {
+        pickup,
+        dropoff,
+        pickupCoords: pickupCoord,
+        dropoffCoords: dropoffCoord,
+        itemType: (route.params as any)?.itemType ?? "",
+        weight: (route.params as any)?.weight ?? "lightweight",
+        specialInstructions: (route.params as any)?.specialInstructions,
+        vehicleType: selected,
+        price: selectedVehicle.price,
+        paymentMethod: "Bundle Credits",
+        isScheduled: true,
+        scheduledTime,
+      });
+    } else {
+      navigation.navigate("RiderMatching", {
+        pickup,
+        dropoff,
+        pickupCoords: pickupCoord,
+        dropoffCoords: dropoffCoord,
+        itemType: (route.params as any)?.itemType ?? "",
+        weight: (route.params as any)?.weight ?? "lightweight",
+        specialInstructions: (route.params as any)?.specialInstructions,
+        vehicleType: selected,
+        price: selectedVehicle.price,
+        paymentMethod: "Bundle Credits",
+      });
+    }
   };
 
-  const mapRegion = {
-    latitude: (PICKUP_COORD.latitude + DROPOFF_COORD.latitude) / 2,
-    longitude: (PICKUP_COORD.longitude + DROPOFF_COORD.longitude) / 2,
-    latitudeDelta: 0.08,
-    longitudeDelta: 0.08,
+  const initialRegion = {
+    latitude: (pickupCoord.latitude + dropoffCoord.latitude) / 2,
+    longitude: (pickupCoord.longitude + dropoffCoord.longitude) / 2,
+    latitudeDelta:
+      Math.abs(pickupCoord.latitude - dropoffCoord.latitude) * 3 + 0.02,
+    longitudeDelta:
+      Math.abs(pickupCoord.longitude - dropoffCoord.longitude) * 3 + 0.02,
   };
 
   return (
@@ -233,44 +260,50 @@ export default function SelectVehicleScreen() {
         backgroundColor="transparent"
       />
 
-      {/* ── Real Map ── */}
-      {USE_STATIC_MAP ? (
-        <Image
-          source={require("../../assets/images/map_long.png")}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
-      ) : (
-        <MapView
-          provider={PROVIDER_GOOGLE}
-          style={StyleSheet.absoluteFillObject}
-          region={mapRegion}
-          scrollEnabled={false}
-          zoomEnabled={false}
-          rotateEnabled={false}
-          customMapStyle={lightMapStyle}
-        >
+      {/* Real Map */}
+      <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
+        style={StyleSheet.absoluteFillObject}
+        initialRegion={initialRegion}
+        customMapStyle={CUSTOM_MAP_STYLE}
+        scrollEnabled={false}
+        zoomEnabled={false}
+        rotateEnabled={false}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        toolbarEnabled={false}
+      >
+        {routeCoords.length > 0 && (
           <Polyline
-            coordinates={[PICKUP_COORD, DROPOFF_COORD]}
+            coordinates={routeCoords}
             strokeColor={Colors.navy}
             strokeWidth={3.5}
           />
-          {/* Pickup — blue dot */}
-          <Marker coordinate={PICKUP_COORD} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.pickupDot}>
-              <View style={styles.pickupDotInner} />
-            </View>
-          </Marker>
-          {/* Dropoff — navy pin */}
-          <Marker coordinate={DROPOFF_COORD} anchor={{ x: 0.5, y: 1 }}>
-            <View style={styles.dropoffPin}>
-              <View style={styles.dropoffPinCircle} />
-              <View style={styles.dropoffPinTail} />
-            </View>
-          </Marker>
-        </MapView>
-      )}
-      {/* ── Back Button ── */}
+        )}
+        <Marker
+          coordinate={pickupCoord}
+          anchor={{ x: 0.5, y: 0.5 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.pickupDot}>
+            <View style={styles.pickupDotInner} />
+          </View>
+        </Marker>
+        <Marker
+          coordinate={dropoffCoord}
+          anchor={{ x: 0.5, y: 1 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.dropoffPin}>
+            <View style={styles.dropoffPinCircle} />
+            <View style={styles.dropoffPinTail} />
+          </View>
+        </Marker>
+      </MapView>
+
+      {/* Back Button */}
       <TouchableOpacity
         style={styles.backBtn}
         onPress={() => navigation.goBack()}
@@ -279,33 +312,28 @@ export default function SelectVehicleScreen() {
         <ArrowBackSvg width={60} height={58} />
       </TouchableOpacity>
 
-      {/* ── ETA Badge ── */}
+      {/* ETA Badge — live from Routes API */}
       <View style={styles.etaBadge}>
-        <Text style={styles.etaText}>{selectedVehicle.eta}</Text>
+        <Text style={styles.etaText}>{displayEta}</Text>
       </View>
 
-      {/* ── Custom Bottom Sheet ── */}
+      {/* Bottom Sheet */}
       <Animated.View
         style={[styles.bottomSheet, { transform: [{ translateY }] }]}
       >
-        {/* Drag handle — full-width touch target for ergonomics */}
         <View style={styles.handleArea} {...panResponder.panHandlers}>
           <View style={styles.handleBar} />
         </View>
 
-        {/* Scrollable content — scroll only works when expanded */}
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={styles.sheetContent}
           showsVerticalScrollIndicator={false}
-          // Disable scroll while collapsed so pan responder owns the gesture
           scrollEnabled={isExpanded}
           bounces={false}
         >
-          {/* Heading */}
           <Text style={styles.heading}>Select Vehicle Type</Text>
 
-          {/* Vehicle Cards */}
           {VEHICLES.map((vehicle) => {
             const isSelected = selected === vehicle.id;
             return (
@@ -327,13 +355,16 @@ export default function SelectVehicleScreen() {
                     </Text>
                   </View>
                   <Text style={styles.vehicleDesc}>{vehicle.description}</Text>
-                  <Text style={styles.vehicleEta}>{vehicle.eta}</Text>
+                  {/* Show live ETA only for selected vehicle */}
+                  {isSelected && (
+                    <Text style={styles.vehicleEta}>{displayEta}</Text>
+                  )}
                 </View>
               </TouchableOpacity>
             );
           })}
 
-          {/* Bundle Credits Row */}
+          {/* Bundle Credits */}
           <TouchableOpacity
             style={styles.bundleRow}
             onPress={() =>
@@ -342,6 +373,8 @@ export default function SelectVehicleScreen() {
                 price: selectedVehicle.price,
                 pickup,
                 dropoff,
+                pickupCoords: pickupCoord,
+                dropoffCoords: dropoffCoord,
               })
             }
             activeOpacity={0.8}
@@ -354,7 +387,7 @@ export default function SelectVehicleScreen() {
             <ChevronRightSvg width={8} height={14} style={{ marginLeft: 4 }} />
           </TouchableOpacity>
 
-          {/* Continue Button */}
+          {/* Continue */}
           <TouchableOpacity
             style={styles.continueBtn}
             onPress={handleContinue}
@@ -370,19 +403,13 @@ export default function SelectVehicleScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#E8EEF4",
-  },
-
-  // Map markers
+  container: { flex: 1, backgroundColor: "#E8EEF4" },
   pickupDot: {
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "rgba(74, 144, 226, 0.25)",
+    backgroundColor: "rgba(74,144,226,0.25)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -394,9 +421,7 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: Colors.white,
   },
-  dropoffPin: {
-    alignItems: "center",
-  },
+  dropoffPin: { alignItems: "center" },
   dropoffPinCircle: {
     width: 18,
     height: 18,
@@ -410,8 +435,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
   },
-
-  // Overlays
   backBtn: {
     position: "absolute",
     top: Platform.OS === "ios" ? 58 : 42,
@@ -444,26 +467,21 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
 
-  // ── Custom Bottom Sheet ──
   bottomSheet: {
     position: "absolute",
     left: 0,
     right: 0,
-    // Sheet starts at the top of screen; translateY controls visible portion
     top: 0,
     height: SCREEN_H,
     backgroundColor: Colors.white,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
-    // Shadow above the sheet
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 16,
   },
-
-  // Handle
   handleArea: {
     width: "100%",
     paddingVertical: 12,
@@ -476,11 +494,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#D0D6E0",
   },
-
-  sheetContent: {
-    paddingHorizontal: 20,
-    paddingTop: 0,
-  },
+  sheetContent: { paddingHorizontal: 20, paddingTop: 0 },
 
   heading: {
     fontFamily: "Poppins-Bold",
@@ -488,10 +502,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     textAlign: "center",
     marginBottom: 18,
-    // letterSpacing: 0.1
   },
-
-  // Vehicle Cards
   vehicleCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -504,13 +515,8 @@ const styles = StyleSheet.create({
     gap: 14,
     backgroundColor: Colors.white,
   },
-  vehicleCardSelected: {
-    borderColor: Colors.navy,
-    borderWidth: 2,
-  },
-  vehicleInfo: {
-    flex: 1,
-  },
+  vehicleCardSelected: { borderColor: Colors.navy, borderWidth: 2 },
+  vehicleInfo: { flex: 1 },
   vehicleTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -521,13 +527,11 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins-SemiBold",
     fontSize: 16,
     color: Colors.textPrimary,
-    letterSpacing: 0.1,
   },
   vehiclePrice: {
     fontFamily: "Poppins-Bold",
     fontSize: 16,
     color: Colors.textPrimary,
-    letterSpacing: 0.1,
   },
   vehicleDesc: {
     fontFamily: "Poppins-Regular",
@@ -541,11 +545,9 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 
-  // Bundle Credits
   bundleRow: {
     flexDirection: "row",
     alignItems: "center",
-    // backgroundColor: Colors.bundleBg,
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -556,7 +558,6 @@ const styles = StyleSheet.create({
     width: 70,
     height: 70,
     borderRadius: 10,
-    // backgroundColor: Colors.bundleIcon,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -573,7 +574,6 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
 
-  // Continue
   continueBtn: {
     backgroundColor: Colors.primary,
     borderRadius: 14,
@@ -588,27 +588,3 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 });
-
-// ─── Light map style ──────────────────────────────────────────────────────────
-const lightMapStyle = [
-  { elementType: "geometry", stylers: [{ color: "#eaf0f6" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#7a9bb5" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#ffffff" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#d0dce8" }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#ccdce8" }],
-  },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-];

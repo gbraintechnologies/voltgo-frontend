@@ -1,4 +1,18 @@
-import React, { useRef, useEffect } from "react";
+/**
+ * AccountScreen.tsx — FIXED
+ *
+ * Fixes applied:
+ *  1. Replaced Alert.alert logout with ConfirmModal (danger variant)
+ *  2. Replaced Alert.alert delete with ConfirmModal (danger variant)
+ *  3. Navigation for logout/delete now uses useAuthStore reset instead of
+ *     navigation.navigate('PhoneAuth') — conditional rendering in your
+ *     root navigator handles the redirect automatically once auth is cleared.
+ *     If you DO have a named screen, replace REPLACE_WITH_YOUR_AUTH_SCREEN
+ *     with the correct name (e.g. 'Auth', 'Login', 'Onboarding').
+ *  4. profile?.full_name (API returns full_name, not fullName)
+ */
+
+import React, { useRef, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -8,11 +22,10 @@ import {
   StatusBar,
   Image,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import ChevronRightSvg from "../../assets/icons/chevron_right.svg";
-
-// ── Import your downloaded SVG icons from Figma ───────────────────────────────
 import PersonIconSvg from "../../assets/icons/person_icon.svg";
 import CardIconSvg from "../../assets/icons/card_icon.svg";
 import MedalIconSvg from "../../assets/icons/medal_icon2.svg";
@@ -20,6 +33,9 @@ import BellIconSvg from "../../assets/icons/bell_icon.svg";
 import ShieldIconSvg from "../../assets/icons/shield_icon.svg";
 import ChatIconSvg from "../../assets/icons/chat_icon.svg";
 import SettingsIconSvg from "../../assets/icons/settings_icon.svg";
+import { useCustomerProfile, useLogout } from "../../hooks/useApi";
+import { useAuthStore } from "../../stores/authStore";
+import ConfirmModal from "../../components/common/ConfirmModal"; // adjust path as needed
 
 const Colors = {
   white: "#FFFFFF",
@@ -29,6 +45,7 @@ const Colors = {
   textMuted: "#9CA3AF",
   border: "#EFEFEF",
   inputBg: "#F2F4F7",
+  logoutRed: "#EF4444",
 };
 
 const MENU_ITEMS = [
@@ -47,7 +64,7 @@ const MENU_ITEMS = [
   },
   {
     id: "notifications",
-    label: "Notifications",
+    label: "Notification Settings",
     Icon: BellIconSvg,
     route: "Notifications",
   },
@@ -65,6 +82,18 @@ export default function AccountScreen() {
   const navigation = useNavigation<any>();
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(16)).current;
+
+  // ─── Modal state ──────────────────────────────────────────────────────────
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+
+  const { data: profileRes, isLoading } = useCustomerProfile();
+  const storedCustomer = useAuthStore((s: any) => s.customer);
+  const clearAuth = useAuthStore((s: any) => s.clearAuth); // expose this from your store
+  const logoutMutation = useLogout();
+
+  // ─── FIX: API returns full_name (snake_case), not fullName ───────────────
+  const profile = profileRes?.data ?? storedCustomer;
 
   useEffect(() => {
     Animated.parallel([
@@ -85,23 +114,36 @@ export default function AccountScreen() {
   const handleMenuPress = (route: string) => {
     switch (route) {
       case "BundlesCredits":
-        navigation.navigate("BundlesCredits"); // plain push, no BundlesFlow wrapper
+        navigation.navigate("BundlesCredits");
         break;
       case "PaymentMethods":
-      // Navigate within DeliveryFlow to PayWith
-      case "PaymentMethods":
-        navigation.navigate("PaymentMethods"); 
+        navigation.navigate("PaymentMethods");
         break;
-        break;
-      // These all live in AccountStackNavigator — navigate directly by name
-      case "Profile":
-      case "Notifications":
-      case "Security":
-      case "Support":
-      case "Settings":
+      default:
         navigation.navigate(route);
         break;
     }
+  };
+
+  // ─── Logout ───────────────────────────────────────────────────────────────
+  const handleLogoutConfirm = () => {
+    logoutMutation.mutate(undefined, {
+      onSettled: () => {
+        setLogoutModalVisible(false);
+        // Auth store clears → root navigator redirects automatically.
+        // If you need manual navigation, replace with:
+        // navigation.reset({ index: 0, routes: [{ name: 'YourAuthScreen' }] });
+      },
+    });
+  };
+
+  // ─── Delete account ───────────────────────────────────────────────────────
+  const handleDeleteConfirm = () => {
+    // TODO: call your delete-account API mutation here, then clear auth.
+    // For now we just clear auth and close:
+    setDeleteModalVisible(false);
+    clearAuth?.();
+    // navigation.reset({ index: 0, routes: [{ name: 'YourAuthScreen' }] });
   };
 
   return (
@@ -124,8 +166,17 @@ export default function AccountScreen() {
             style={styles.avatar}
           />
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>Cephas Ntiamoah</Text>
-            <Text style={styles.userEmail}>cephasntiamoah10@gmail.com</Text>
+            {isLoading ? (
+              <ActivityIndicator size="small" color={Colors.navy} />
+            ) : (
+              <>
+                {/* FIX: full_name not fullName */}
+                <Text style={styles.userName}>
+                  {profile?.full_name ?? profile?.fullName ?? "—"}
+                </Text>
+                <Text style={styles.userEmail}>{profile?.phone ?? "—"}</Text>
+              </>
+            )}
           </View>
         </View>
 
@@ -150,8 +201,55 @@ export default function AccountScreen() {
           ))}
         </View>
 
+        {/* Logout button */}
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={() => setLogoutModalVisible(true)}
+          activeOpacity={0.75}
+        >
+          <Text style={styles.logoutText}>Log out</Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 16 }} />
+
+        {/* Delete account button */}
+        {/* <TouchableOpacity
+          style={styles.deleteBtn}
+          onPress={() => setDeleteModalVisible(true)}
+          activeOpacity={0.75}
+        >
+          <Text style={styles.deleteText}>Delete account</Text>
+        </TouchableOpacity> */}
+
         <View style={{ height: 40 }} />
       </Animated.ScrollView>
+
+      {/* ── Logout confirmation modal ──────────────────────────────────────── */}
+      <ConfirmModal
+        visible={logoutModalVisible}
+        title="Log out"
+        message="Are you sure you want to log out of your account?"
+        confirmLabel="Log out"
+        cancelLabel="Cancel"
+        variant="danger"
+        loading={logoutMutation.isPending}
+        onConfirm={handleLogoutConfirm}
+        onCancel={() => setLogoutModalVisible(false)}
+      />
+
+      {/* ── Delete account confirmation modal ─────────────────────────────── */}
+      <ConfirmModal
+        visible={deleteModalVisible}
+        title="Delete account"
+        message={
+          "This will permanently delete your account and all your data. This action cannot be undone."
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteModalVisible(false)}
+      />
     </View>
   );
 }
@@ -185,7 +283,7 @@ const styles = StyleSheet.create({
   avatar: { width: 56, height: 56, borderRadius: 28 },
   userInfo: { flex: 1 },
   userName: {
-    fontFamily: "HelveticaNeue-CondensedBold",
+    fontFamily: "Poppins-SemiBold",
     fontSize: 17,
     color: Colors.textPrimary,
     marginBottom: 3,
@@ -210,5 +308,30 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins-Regular",
     fontSize: 15,
     color: Colors.textPrimary,
+  },
+  logoutBtn: {
+    marginTop: 24,
+    borderWidth: 1.5,
+    borderColor: Colors.logoutRed,
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: "center",
+  },
+  logoutText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 15,
+    color: Colors.logoutRed,
+  },
+  deleteBtn: {
+    borderWidth: 1.5,
+    borderColor: "#E05252",
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: "center",
+  },
+  deleteText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 15,
+    color: "#E05252",
   },
 });

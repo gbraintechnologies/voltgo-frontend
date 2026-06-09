@@ -175,8 +175,10 @@ const styles = StyleSheet.create({
   chipText: { fontFamily: 'Poppins-Regular', fontSize: 13, color: Colors.textPrimary },
   chipTextActive: { fontFamily: 'Poppins-SemiBold', color: Colors.white },
   applyBtn: {
-    marginTop: 28, backgroundColor: Colors.navy,
+    marginTop: 28, backgroundColor: Colors.primary,
     borderRadius: 16, paddingVertical: 18, alignItems: 'center',
   },
-  applyBtnText: { fontFamily: 'HelveticaNeue-CondensedBold', fontSize: 17, color: Colors.white, letterSpacing: 0.3 },
+  applyBtnText: { fontFamily: 'Poppins-SemiBold', fontSize: 17, color: Colors.white, letterSpacing: 0.3 },
 });
+
+

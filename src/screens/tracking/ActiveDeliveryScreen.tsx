@@ -1,4 +1,11 @@
-import React, { useRef, useState, useCallback } from "react";
+/**
+ * ActiveDeliveryScreen.tsx
+ * ─────────────────────────────────────────────────────────
+ * Real MapView + Routes API polyline + live rider marker
+ * animated along the decoded route. UI unchanged from original.
+ */
+
+import React, { useRef, useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -15,7 +22,6 @@ import {
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { DeliveryStackParamList } from "../../navigation/types";
 import PhoneCallSvg from "../../assets/icons/phone_call.svg";
 import ChatBubbleSvg from "../../assets/icons/chat_bubble.svg";
@@ -23,6 +29,8 @@ import PinLocationSvg from "../../assets/icons/pin_location.svg";
 import StarSvg from "../../assets/icons/star.svg";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
 import ChevronRightSvg from "../../assets/icons/chevron_right.svg";
+import { useRoutePolyline } from "../../utils/useRoutePolyline";
+import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
 
 const { width, height: SCREEN_H } = Dimensions.get("window");
 
@@ -40,33 +48,88 @@ const Colors = {
   inputBg: "#F2F4F7",
 };
 
-// ── Snap points ───────────────────────────────────────────────────────────────
-const SNAP_CARD = SCREEN_H * 0.72; // collapsed card (~28% of screen)
-const SNAP_DETAIL = SCREEN_H * 0.2; // expanded detail (~80% of screen)
+const SNAP_CARD = SCREEN_H * 0.72;
+const SNAP_DETAIL = SCREEN_H * 0.2;
 const SNAP_THRESHOLD = 60;
 const VELOCITY_THRESHOLD = 0.4;
 
+// Simulated delivery progress (45% of the way) — replace with real backend data
+const DELIVERY_PROGRESS = 0.45;
+
 type RouteParams = RouteProp<DeliveryStackParamList, "ActiveDelivery">;
 
-const PICKUP_COORD = { latitude: 5.5968, longitude: -0.1869 };
-const DROPOFF_COORD = { latitude: 5.6502, longitude: -0.187 };
-const PROGRESS = 0.45;
+const DEFAULT_PICKUP = { latitude: 5.5968, longitude: -0.1869 };
+const DEFAULT_DROPOFF = { latitude: 5.6502, longitude: -0.187 };
+
+function interpolateOnRoute(
+  coords: { latitude: number; longitude: number }[],
+  progress: number,
+): { latitude: number; longitude: number } | null {
+  if (coords.length < 2) return null;
+  const clamp = Math.max(0, Math.min(1, progress));
+  const total = coords.length - 1;
+  const fi = clamp * total;
+  const si = Math.floor(fi);
+  const sp = fi - si;
+  const a = coords[Math.min(si, total - 1)];
+  const b = coords[Math.min(si + 1, total)];
+  return {
+    latitude: a.latitude + (b.latitude - a.latitude) * sp,
+    longitude: a.longitude + (b.longitude - a.longitude) * sp,
+  };
+}
 
 export default function ActiveDeliveryScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
+  const mapRef = useRef<MapView>(null);
+
   const {
     riderName = "John Cena",
     riderPlate = "GHA - 2233343 -4",
     riderRating = 4.5,
     itemType = "Parcel",
     weight = "lightweight",
-    etaMinutes = 15,
+    etaMinutes: etaProp = 15,
     specialInstructions = "Handle it as if your life depends on it.",
     paymentMethod = "Bundle credits",
     pickup = "American House",
     dropoff = "University of Ghana",
   } = route.params ?? {};
+
+  const pickupCoord = (route.params as any)?.pickupCoords ?? DEFAULT_PICKUP;
+  const dropoffCoord = (route.params as any)?.dropoffCoords ?? DEFAULT_DROPOFF;
+
+  const vehicleType = (route.params as any)?.vehicleType ?? "bicycle";
+
+  const { coords: routeCoords, etaMinutes } = useRoutePolyline({
+    origin: pickupCoord,
+    destination: dropoffCoord,
+    mode: vehicleType === "e-motorcycle" ? "TWO_WHEELER" : "BICYCLE",
+  });
+
+  // Rider position based on progress
+  const [riderCoord, setRiderCoord] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (routeCoords.length === 0) return;
+    const pos = interpolateOnRoute(routeCoords, DELIVERY_PROGRESS);
+    if (pos) setRiderCoord(pos);
+  }, [routeCoords]);
+
+  // Fit map to show route with room for the card
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const points =
+      routeCoords.length > 0 ? routeCoords : [pickupCoord, dropoffCoord];
+    mapRef.current.fitToCoordinates(points, {
+      edgePadding: { top: 80, right: 60, bottom: SCREEN_H * 0.35, left: 60 },
+      animated: true,
+    });
+  }, [routeCoords]);
 
   const weightLabel =
     weight === "lightweight"
@@ -75,14 +138,12 @@ export default function ActiveDeliveryScreen() {
         ? "Standard"
         : "Heavy";
 
-  // ── Bottom sheet animation ─────────────────────────────────────────────────
+  const displayEta = etaMinutes ?? etaProp;
+
+  // ── Bottom sheet ──────────────────────────────────────────────────────────
   const translateY = useRef(new Animated.Value(SNAP_CARD)).current;
   const lastY = useRef(SNAP_CARD);
   const [isExpanded, setIsExpanded] = useState(false);
-
-  const USE_STATIC_MAP = true;
-
-  // Detail section fade-in
   const detailOpacity = useRef(new Animated.Value(0)).current;
 
   const springTo = useCallback(
@@ -90,7 +151,6 @@ export default function ActiveDeliveryScreen() {
       const expanding = toValue < SNAP_CARD;
       lastY.current = toValue;
       setIsExpanded(expanding);
-
       Animated.parallel([
         Animated.spring(translateY, {
           toValue,
@@ -112,7 +172,6 @@ export default function ActiveDeliveryScreen() {
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, { dy }) => Math.abs(dy) > 5,
-
       onPanResponderGrant: () => {
         translateY.stopAnimation((val) => {
           lastY.current = val;
@@ -120,7 +179,6 @@ export default function ActiveDeliveryScreen() {
           translateY.setValue(0);
         });
       },
-
       onPanResponderMove: (_, { dy }) => {
         const next = Math.min(
           Math.max(lastY.current + dy, SNAP_DETAIL),
@@ -128,29 +186,30 @@ export default function ActiveDeliveryScreen() {
         );
         translateY.setValue(next - lastY.current);
       },
-
       onPanResponderRelease: (_, { dy, vy }) => {
         translateY.flattenOffset();
         const current = lastY.current + dy;
-
-        if (vy < -VELOCITY_THRESHOLD || dy < -SNAP_THRESHOLD) {
+        if (vy < -VELOCITY_THRESHOLD || dy < -SNAP_THRESHOLD)
           springTo(SNAP_DETAIL);
-        } else if (vy > VELOCITY_THRESHOLD || dy > SNAP_THRESHOLD) {
+        else if (vy > VELOCITY_THRESHOLD || dy > SNAP_THRESHOLD)
           springTo(SNAP_CARD);
-        } else {
-          const nearCard = Math.abs(current - SNAP_CARD);
-          const nearDetail = Math.abs(current - SNAP_DETAIL);
-          springTo(nearCard < nearDetail ? SNAP_CARD : SNAP_DETAIL);
-        }
+        else
+          springTo(
+            Math.abs(current - SNAP_CARD) < Math.abs(current - SNAP_DETAIL)
+              ? SNAP_CARD
+              : SNAP_DETAIL,
+          );
       },
     }),
   ).current;
 
-  const mapRegion = {
-    latitude: (PICKUP_COORD.latitude + DROPOFF_COORD.latitude) / 2 + 0.005,
-    longitude: (PICKUP_COORD.longitude + DROPOFF_COORD.longitude) / 2,
-    latitudeDelta: 0.09,
-    longitudeDelta: 0.09,
+  const initialRegion = {
+    latitude: (pickupCoord.latitude + dropoffCoord.latitude) / 2 + 0.005,
+    longitude: (pickupCoord.longitude + dropoffCoord.longitude) / 2,
+    latitudeDelta:
+      Math.abs(pickupCoord.latitude - dropoffCoord.latitude) * 3 + 0.02,
+    longitudeDelta:
+      Math.abs(pickupCoord.longitude - dropoffCoord.longitude) * 3 + 0.02,
   };
 
   return (
@@ -161,63 +220,71 @@ export default function ActiveDeliveryScreen() {
         backgroundColor="transparent"
       />
 
-      {/* ── Map ── */}
-      {USE_STATIC_MAP ? (
-        <Image
-          source={require("../../assets/images/map_placeholder.png")}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
-      ) : (
-        <MapView
-          provider={PROVIDER_GOOGLE}
-          style={StyleSheet.absoluteFillObject}
-          region={mapRegion}
-          scrollEnabled={false}
-          zoomEnabled={false}
-          rotateEnabled={false}
-          customMapStyle={lightMapStyle}
-        >
+      {/* Real Map */}
+      <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
+        style={StyleSheet.absoluteFillObject}
+        initialRegion={initialRegion}
+        customMapStyle={CUSTOM_MAP_STYLE}
+        scrollEnabled={false}
+        zoomEnabled={false}
+        rotateEnabled={false}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        toolbarEnabled={false}
+      >
+        {routeCoords.length > 0 && (
           <Polyline
-            coordinates={[PICKUP_COORD, DROPOFF_COORD]}
+            coordinates={routeCoords}
             strokeColor={Colors.navy}
             strokeWidth={4}
           />
-          <Marker coordinate={PICKUP_COORD} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.pickupHalo}>
-              <View style={styles.pickupDot}>
-                <View style={styles.pickupDotInner} />
-              </View>
+        )}
+
+        {/* Pickup */}
+        <Marker
+          coordinate={pickupCoord}
+          anchor={{ x: 0.5, y: 0.5 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.pickupHalo}>
+            <View style={styles.pickupDot}>
+              <View style={styles.pickupDotInner} />
             </View>
-          </Marker>
-          <Marker coordinate={DROPOFF_COORD} anchor={{ x: 0.5, y: 1 }}>
-            <View style={styles.dropoffPin}>
-              <View style={styles.dropoffPinCircle} />
-              <View style={styles.dropoffPinTail} />
-            </View>
-          </Marker>
+          </View>
+        </Marker>
+
+        {/* Dropoff */}
+        <Marker
+          coordinate={dropoffCoord}
+          anchor={{ x: 0.5, y: 1 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.dropoffPin}>
+            <View style={styles.dropoffPinCircle} />
+            <View style={styles.dropoffPinTail} />
+          </View>
+        </Marker>
+
+        {/* Rider — positioned at DELIVERY_PROGRESS along route */}
+        {riderCoord && (
           <Marker
-            coordinate={{
-              latitude:
-                PICKUP_COORD.latitude +
-                (DROPOFF_COORD.latitude - PICKUP_COORD.latitude) * PROGRESS,
-              longitude:
-                PICKUP_COORD.longitude +
-                (DROPOFF_COORD.longitude - PICKUP_COORD.longitude) * PROGRESS,
-            }}
+            coordinate={riderCoord}
             anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
           >
             <View style={styles.riderMarker}>
-              <Image
-                source={require("../../assets/images/bicycle_marker.png")}
-                style={{ width: 40, height: 32 }}
-                resizeMode="contain"
-              />
+              <Text style={{ fontSize: 20 }}>
+                {vehicleType === "e-motorcycle" ? "🛵" : "🚲"}
+              </Text>
             </View>
           </Marker>
-        </MapView>
-      )}
-      {/* ── Back Button ── */}
+        )}
+      </MapView>
+
+      {/* Back Button */}
       <TouchableOpacity
         style={styles.backBtn}
         onPress={() => navigation.goBack()}
@@ -226,9 +293,8 @@ export default function ActiveDeliveryScreen() {
         <ArrowBackSvg width={50} height={48} />
       </TouchableOpacity>
 
-      {/* ── Animated Bottom Sheet ── */}
+      {/* Bottom Sheet */}
       <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
-        {/* Drag Handle */}
         <View {...panResponder.panHandlers} style={styles.handleArea}>
           <View style={styles.handleBar} />
         </View>
@@ -239,13 +305,13 @@ export default function ActiveDeliveryScreen() {
           scrollEnabled={isExpanded}
           bounces={false}
         >
-          {/* ── Always-visible card section ── */}
+          {/* Card summary (always visible) */}
           <TouchableOpacity
             style={styles.cardSummary}
             onPress={() => springTo(isExpanded ? SNAP_CARD : SNAP_DETAIL)}
             activeOpacity={0.95}
           >
-            {/* Row 1: Rider */}
+            {/* Rider row */}
             <View style={styles.riderRow}>
               <View style={styles.avatarWrap}>
                 <Image
@@ -259,7 +325,7 @@ export default function ActiveDeliveryScreen() {
               </View>
               <View style={styles.riderTextWrap}>
                 <Text style={styles.riderName}>{riderName}</Text>
-                <Text style={styles.riderEta}>{etaMinutes} mins estimated</Text>
+                <Text style={styles.riderEta}>{displayEta} mins estimated</Text>
               </View>
               <View style={styles.actionsRow}>
                 <TouchableOpacity
@@ -285,20 +351,21 @@ export default function ActiveDeliveryScreen() {
               </View>
             </View>
 
-            {/* Row 2: Progress */}
+            {/* Progress row */}
             <View style={styles.progressRow}>
               <PinLocationSvg width={14} height={18} />
               <View style={styles.progressTrack}>
                 <View
-                  style={[styles.progressFill, { width: `${PROGRESS * 100}%` }]}
+                  style={[
+                    styles.progressFill,
+                    { width: `${DELIVERY_PROGRESS * 100}%` },
+                  ]}
                 />
               </View>
-              <View style={styles.progressRightWrap}>
-                <PinLocationSvg width={14} height={18} />
-              </View>
+              <PinLocationSvg width={14} height={18} />
             </View>
 
-            {/* Row 3: Parcel */}
+            {/* Parcel */}
             <View style={styles.parcelRow}>
               <View>
                 <Text style={styles.parcelType}>{itemType}</Text>
@@ -336,14 +403,12 @@ export default function ActiveDeliveryScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* ── Expandable detail section ── */}
+          {/* Expandable detail section */}
           <Animated.View
             style={[styles.detailSection, { opacity: detailOpacity }]}
           >
             <View style={styles.detailDivider} />
-
             <Text style={styles.detailHeading}>Delivery Details</Text>
-
             <DetailRow label="Pickup" value={pickup} />
             <DetailRow label="Drop-off" value={dropoff} />
             <DetailRow label="Item type" value={itemType} />
@@ -354,9 +419,7 @@ export default function ActiveDeliveryScreen() {
             />
             <DetailRow label="Payment" value={paymentMethod} />
             <DetailRow label="Plate number" value={riderPlate} />
-
             <View style={{ height: 24 }} />
-
             <TouchableOpacity
               style={styles.cancelBtn}
               onPress={() => navigation.navigate("HomeMap")}
@@ -364,7 +427,6 @@ export default function ActiveDeliveryScreen() {
             >
               <Text style={styles.cancelText}>Cancel Delivery</Text>
             </TouchableOpacity>
-
             <View style={{ height: 40 }} />
           </Animated.View>
         </ScrollView>
@@ -447,11 +509,17 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 2,
   },
   riderMarker: {
-    width: 46,
-    height: 38,
-    backgroundColor: "transparent",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.white,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
   },
 
   backBtn: {
@@ -471,7 +539,6 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
 
-  // ── Sheet ──
   sheet: {
     position: "absolute",
     left: 0,
@@ -495,7 +562,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#D0D6E0",
   },
   sheetScroll: { paddingHorizontal: 18 },
-
   cardSummary: { paddingTop: 4 },
 
   riderRow: {
@@ -570,7 +636,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.progressFill,
     borderRadius: 3,
   },
-  progressRightWrap: { flexDirection: "row", alignItems: "center", gap: 4 },
 
   parcelRow: {
     flexDirection: "row",
@@ -605,7 +670,6 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // ── Detail section ──
   detailSection: { paddingTop: 4 },
   detailDivider: {
     height: 1,
@@ -633,26 +697,3 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 });
-
-const lightMapStyle = [
-  { elementType: "geometry", stylers: [{ color: "#eaf0f6" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#7a9bb5" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#ffffff" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#d0dce8" }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#ccdce8" }],
-  },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-];

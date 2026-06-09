@@ -1,21 +1,18 @@
 /**
- * MapRouteHeader
+ * MapRouteHeader.tsx
+ * ─────────────────────────────────────────────────────────
+ * Shared map header used across:
+ *   SelectVehicleScreen, RiderMatchingScreen, RiderFoundScreen,
+ *   RiderArrivingScreen, ActiveDeliveryScreen
  *
- * Shared component used in:
- *  - SelectVehicleScreen
- *  - RiderMatchingScreen
- *  - RiderFoundScreen
- *  - RiderArrivingScreen
- *  - ActiveDeliveryScreen
- *
- * Shows the map (or placeholder) with:
- *  - Route line drawn (A → B)
- *  - ETA badge (navy pill, e.g. "33 min")
- *  - Optional back arrow button (floating, white circle)
- *
- * Replace <MapPlaceholder /> with a real <MapView> when react-native-maps is installed.
+ * Now uses a real MapView with:
+ *   - Google Routes API polyline (via useRoutePolyline hook)
+ *   - Pickup dot marker + dropoff pin marker
+ *   - ETA badge (auto-computed from Routes API, falls back to prop)
+ *   - Optional back button
+ *   - Custom light map style
  */
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -23,60 +20,135 @@ import {
   TouchableOpacity,
   Dimensions,
 } from "react-native";
+import MapView, {
+  Marker,
+  Polyline,
+  PROVIDER_GOOGLE,
+  Region,
+} from "react-native-maps";
 import { Colors, Typography, Spacing, Radius, Shadow } from "../../theme";
+import {
+  useRoutePolyline,
+  LatLng,
+  TravelMode,
+} from "../../utils/useRoutePolyline";
+import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
 
 const { width, height } = Dimensions.get("window");
 export const MAP_HEIGHT = height * 0.46;
 
 interface Props {
+  origin: LatLng;
+  destination: LatLng;
+  /** Vehicle mode affects the routing calculation */
+  mode?: TravelMode;
   onBack?: () => void;
   showBack?: boolean;
+  /** Fallback ETA shown while route is loading. Ignored once Routes API responds. */
   etaMinutes?: number;
   style?: object;
+  /** Optionally render extra markers / overlays inside the MapView */
+  children?: React.ReactNode;
 }
 
 export default function MapRouteHeader({
+  origin,
+  destination,
+  mode = "DRIVE",
   onBack,
   showBack = true,
-  etaMinutes = 33,
+  etaMinutes: etaProp = 33,
   style,
+  children,
 }: Props) {
+  const mapRef = useRef<MapView>(null);
+
+  const {
+    coords,
+    etaMinutes: etaFromAPI,
+    loading,
+  } = useRoutePolyline({
+    origin,
+    destination,
+    mode,
+  });
+
+  const displayedEta = etaFromAPI ?? etaProp;
+
+  // Fit the map to show both markers once the route arrives
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const points = coords.length > 0 ? coords : [origin, destination];
+    mapRef.current.fitToCoordinates(points, {
+      edgePadding: { top: 60, right: 60, bottom: 100, left: 60 },
+      animated: true,
+    });
+  }, [coords]);
+
+  // Initial region centred between origin and destination
+  const initialRegion: Region = {
+    latitude: (origin.latitude + destination.latitude) / 2,
+    longitude: (origin.longitude + destination.longitude) / 2,
+    latitudeDelta:
+      Math.abs(origin.latitude - destination.latitude) * 2.5 + 0.02,
+    longitudeDelta:
+      Math.abs(origin.longitude - destination.longitude) * 2.5 + 0.02,
+  };
+
   return (
     <View style={[styles.mapSection, style]}>
-      {/*
-        ── react-native-maps implementation ──────────────────────────────────
-        import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-        import CUSTOM_MAP_STYLE from '../utils/mapStyle';
-
-        Replace <MapPlaceholder /> with:
-
-        <MapView
-          style={StyleSheet.absoluteFillObject}
-          provider={PROVIDER_GOOGLE}
-          initialRegion={INITIAL_REGION}
-          customMapStyle={CUSTOM_MAP_STYLE}
-          scrollEnabled={false}
-          zoomEnabled={false}
-        >
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFillObject}
+        provider={PROVIDER_GOOGLE}
+        initialRegion={initialRegion}
+        customMapStyle={CUSTOM_MAP_STYLE}
+        scrollEnabled={false}
+        zoomEnabled={false}
+        rotateEnabled={false}
+        pitchEnabled={false}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        showsScale={false}
+        toolbarEnabled={false}
+      >
+        {/* Real road polyline from Routes API */}
+        {coords.length > 0 && (
           <Polyline
-            coordinates={[
-              { latitude: 5.8700, longitude: 0.0480 },  // user location
-              { latitude: 5.8840, longitude: 0.0590 },  // dropoff
-            ]}
+            coordinates={coords}
             strokeColor={Colors.navy}
-            strokeWidth={3}
+            strokeWidth={3.5}
+            lineDashPattern={undefined}
           />
-          <Marker coordinate={{ latitude: 5.8700, longitude: 0.0480 }}>
-            <View style={{ width: 14, height: 14, borderRadius: 7,
-              backgroundColor: Colors.primary, borderWidth: 3, borderColor: '#fff' }} />
-          </Marker>
-          <Marker coordinate={{ latitude: 5.8840, longitude: 0.0590 }}>
-            <Text style={{ fontSize: 22 }}>📍</Text>
-          </Marker>
-        </MapView>
-        ─────────────────────────────────────────────────────────────────────
-      */}
-      <MapPlaceholder />
+        )}
+
+        {/* Pickup dot */}
+        <Marker
+          coordinate={origin}
+          anchor={{ x: 0.5, y: 0.5 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.pickupOuter}>
+            <View style={styles.pickupInner} />
+          </View>
+        </Marker>
+
+        {/* Dropoff pin */}
+        <Marker
+          coordinate={destination}
+          anchor={{ x: 0.5, y: 1 }}
+          tracksViewChanges={false}
+        >
+          <View style={styles.dropoffPin}>
+            <View style={styles.dropoffCircle} />
+            <View style={styles.dropoffTail} />
+          </View>
+        </Marker>
+
+        {/* Additional markers passed by screens (e.g. animated rider position) */}
+        {children}
+      </MapView>
 
       {/* Back button */}
       {showBack && onBack && (
@@ -91,72 +163,7 @@ export default function MapRouteHeader({
 
       {/* ETA Badge */}
       <View style={styles.etaBadge}>
-        <Text style={styles.etaText}>{etaMinutes} min</Text>
-      </View>
-    </View>
-  );
-}
-
-function MapPlaceholder() {
-  return (
-    <View style={styles.mapBg}>
-      {/* Simulated roads */}
-      <View
-        style={[styles.road, { top: "40%", left: 0, right: 0, height: 2 }]}
-      />
-      <View
-        style={[styles.road, { top: "20%", left: 0, right: 0, height: 1 }]}
-      />
-      <View
-        style={[styles.road, { top: "65%", left: 0, right: 0, height: 1 }]}
-      />
-      <View
-        style={[styles.road, { left: "30%", top: 0, bottom: 0, width: 2 }]}
-      />
-      <View
-        style={[styles.road, { left: "60%", top: 0, bottom: 0, width: 1 }]}
-      />
-
-      {/* Labels */}
-      <Text style={[styles.mapLabel, { top: "10%", right: "8%" }]}>
-        Afienya
-      </Text>
-      <Text style={[styles.mapLabel, { top: "18%", right: "10%" }]}>
-        Next Filling Station
-      </Text>
-      <Text style={[styles.mapLabel, { top: "38%", left: "35%" }]}>
-        Stariua Prep. School
-      </Text>
-      <Text style={[styles.mapLabel, { top: "52%", left: "5%" }]}>
-        Zee's glam & nails
-      </Text>
-      <Text style={[styles.mapLabel, { top: "22%", left: "10%" }]}>Romesh</Text>
-
-      {/* Route line (simplified) */}
-      <View style={styles.routeLineH} />
-      <View style={styles.routeLineV} />
-
-      {/* Rider marker on route */}
-      <Text style={[styles.markerEmoji, { top: "36%", left: "26%" }]}>🚲</Text>
-      <Text style={[styles.markerEmoji, { top: "28%", left: "42%" }]}>🛵</Text>
-      <Text style={[styles.markerEmoji, { top: "48%", left: "55%" }]}>🚲</Text>
-
-      {/* Dropoff pin */}
-      <Text
-        style={[styles.markerEmoji, { top: "15%", right: "22%", fontSize: 22 }]}
-      >
-        📍
-      </Text>
-
-      {/* User dot */}
-      <View style={styles.userDot} />
-
-      {/* POI markers */}
-      <View style={[styles.poiDot, { top: "10%", left: "8%" }]}>
-        <Text style={{ fontSize: 10 }}>🍽️</Text>
-      </View>
-      <View style={[styles.poiDot, { top: "22%", right: "18%" }]}>
-        <Text style={{ fontSize: 10 }}>🍽️</Text>
+        <Text style={styles.etaText}>{displayedEta} min</Text>
       </View>
     </View>
   );
@@ -164,68 +171,43 @@ function MapPlaceholder() {
 
 const styles = StyleSheet.create({
   mapSection: {
-    flex: 1, // ← was: height: MAP_HEIGHT
+    flex: 1,
     position: "relative",
     overflow: "hidden",
   },
-  mapBg: {
-    flex: 1,
-    backgroundColor: "#E8EEF4",
-    position: "relative",
-  },
-  road: {
-    position: "absolute",
-    backgroundColor: "rgba(180,200,220,0.6)",
-  },
-  mapLabel: {
-    position: "absolute",
-    fontFamily: "Nunito-Regular",
-    fontSize: 9,
-    color: "#8899AA",
-  },
-  // Route: horizontal + vertical segments (L-shaped like in screenshots)
-  routeLineH: {
-    position: "absolute",
-    height: 3,
-    backgroundColor: Colors.navy,
-    left: "15%",
-    right: "35%",
-    top: "44%",
-    borderRadius: 2,
-  },
-  routeLineV: {
-    position: "absolute",
-    width: 3,
-    backgroundColor: Colors.navy,
-    right: "35%",
-    top: "18%",
-    height: "27%",
-    borderRadius: 2,
-  },
-  markerEmoji: {
-    position: "absolute",
-    fontSize: 20,
-  },
-  userDot: {
-    position: "absolute",
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: Colors.primary,
-    borderWidth: 3,
-    borderColor: Colors.white,
-    bottom: "52%",
-    left: "13%",
-    ...Shadow.soft,
-  },
-  poiDot: {
-    position: "absolute",
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: "#F97316",
+
+  // Pickup marker
+  pickupOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(74,144,226,0.25)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  pickupInner: {
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    backgroundColor: "#4A90E2",
+    borderWidth: 2.5,
+    borderColor: "#fff",
+  },
+
+  // Dropoff marker
+  dropoffPin: { alignItems: "center" },
+  dropoffCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.navy,
+  },
+  dropoffTail: {
+    width: 3,
+    height: 8,
+    backgroundColor: Colors.navy,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 2,
   },
 
   // Back button
@@ -263,3 +245,5 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
 });
+
+

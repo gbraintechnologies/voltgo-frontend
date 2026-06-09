@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-SemiBold', fontSize: 14, color: Colors.successText,
   },
   sectionTitle: {
-    fontFamily: 'HelveticaNeue-CondensedBold', fontSize: 15,
+    fontFamily: 'Poppins-Bold', fontSize: 15,
     color: Colors.navy, marginBottom: 10, letterSpacing: 0.1,
   },
   card: { borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },

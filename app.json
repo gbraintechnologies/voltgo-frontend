@@ -18,7 +18,7 @@
         "NSFaceIDUsageDescription": "VoltGO uses Face ID for fast, secure sign-in."
       },
       "config": {
-        "googleMapsApiKey": "AIzaSyAk8BLnZJ0PzUOJXdU2IUmTJTDwwsbS_3s"
+        "googleMapsApiKey": "YOUR_API_KEY_HERE"
       }
     },
     "android": {
@@ -29,17 +29,33 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.voltgo.app",
-      "permissions": ["USE_FINGERPRINT", "USE_BIOMETRIC"],
+      "permissions": [
+        "USE_FINGERPRINT",
+        "USE_BIOMETRIC",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
       "predictiveBackGestureEnabled": false,
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyAk8BLnZJ0PzUOJXdU2IUmTJTDwwsbS_3s"
+          "apiKey": "YOUR_API_KEY_HERE"
         }
       }
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-font"]
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "VoltGO needs your location to find nearby riders and set your pickup point."
+        }
+      ]
+    ]
   }
 }
+
+

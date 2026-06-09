@@ -12,12 +12,19 @@ import {
   Platform,
   ScrollView,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import { SvgXml } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import * as Haptics from "expo-haptics";
 import { Colors, Spacing, Radius } from "../../theme";
 import { RootStackParamList } from "../../navigation/types";
+import { useRegister, useLogin, useSendOtp } from "../../hooks/useApi";
+import { useAuthStore } from "../../stores/authStore";
+import { ApiError } from "../../api/client";
+import { useToast } from "../../components/common/Toast";
+import ConfirmModal from "../../components/common/ConfirmModal";
 
 const { width, height } = Dimensions.get("window");
 const HERO_HEIGHT = height * 0.34;
@@ -33,23 +40,26 @@ const googleSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
 </svg>`;
 
-const appleSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <path fill="#000000" d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
-</svg>`;
+type AuthMode = "phone" | "login" | "register";
 
 export default function PhoneAuthScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const toast = useToast();
+
   const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [mode, setMode] = useState<AuthMode>("phone");
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Modal state for "account already exists" prompt
+  const [accountExistsModal, setAccountExistsModal] = useState(false);
+
   const slideUp = useRef(new Animated.Value(30)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
 
-  // Load fingerprint SVG from file
-  const [fingerprintXml, setFingerprintXml] = useState<string | null>(null);
-  useEffect(() => {
-    // We read the downloaded SVG file as a module
-    // REPLACE this xml string with your actual downloaded fingerprint svg content
-    setFingerprintXml(require("../../../assets/icons/fingerprint.svg"));
-  }, []);
+  const registerMutation = useRegister();
+  const loginMutation = useLogin();
 
   useEffect(() => {
     Animated.parallel([
@@ -67,121 +77,312 @@ export default function PhoneAuthScreen({ navigation }: Props) {
     ]).start();
   }, []);
 
+  const isLoading = registerMutation.isPending || loginMutation.isPending;
+
+  const handleContinuePhone = () => {
+    const cleaned = phone.replace(/\s/g, "");
+    if (cleaned.length < 9) {
+      // Light warning haptic — user made an input error
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      toast.warning("Please enter a valid phone number.");
+      return;
+    }
+    // Subtle tap feedback on successful step progression
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setMode("login");
+  };
+
+  const handleLogin = async () => {
+    if (!password) return;
+    const cleaned = phone.replace(/\s/g, "");
+    try {
+      await loginMutation.mutateAsync({ phone: cleaned, password });
+      // Success haptic — auth store update triggers navigation
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      // Error haptic — login failed
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : "Login failed. Please try again.";
+      toast.error(msg);
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!fullName.trim() || !password) return;
+    const cleaned = phone.replace(/\s/g, "");
+    try {
+      await registerMutation.mutateAsync({
+        fullName: fullName.trim(),
+        phone: cleaned,
+        password,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      navigation.navigate("OTPVerification", { phone: cleaned });
+    } catch (err) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const msg =
+        err instanceof ApiError ? err.message : "Registration failed.";
+      if (err instanceof ApiError && err.status === 409) {
+        setAccountExistsModal(true);
+      } else {
+        toast.error(msg);
+      }
+    }
+  };
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.primary} />
-
-      {/* Hero */}
-      <View style={[styles.heroSection, { marginTop: insets.top + 12 }]}>
-        <Text style={styles.watermark}>VoltGO</Text>
-        <View style={styles.illustrationWrap}>
-          <Image
-            source={require("../../../assets/images/postal_worker.png")}
-            style={{
-              width: width * 0.9,
-              height: HERO_HEIGHT * 1,
-            }}
-            resizeMode="contain"
-          />
-        </View>
-      </View>
-
-      {/* Form */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[
-          styles.contentSection,
-          { paddingBottom: insets.bottom + 24 },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Animated.View
-          style={{ opacity: fadeIn, transform: [{ translateY: slideUp }] }}
-        >
-          <Text style={styles.heading}>Enter your number</Text>
-          <Text style={styles.subtitle}>
-            We will send you a verification code on this number as SMS.
-          </Text>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.primary} />
 
-          {/* Phone Input */}
-          <View style={styles.inputRow}>
-            <TouchableOpacity style={styles.countryPicker}>
-              <Text style={styles.flagEmoji}>🇬🇭</Text>
-              <Text style={styles.chevron}>▾</Text>
-            </TouchableOpacity>
-            <TextInput
-              style={styles.phoneInput}
-              placeholder="+233"
-              placeholderTextColor="#AAAAAA"
-              keyboardType="phone-pad"
-              value={phone}
-              onChangeText={setPhone}
+        <View style={[styles.heroSection, { marginTop: insets.top + 12 }]}>
+          <Text style={styles.watermark}>VoltGO</Text>
+          <View style={styles.illustrationWrap}>
+            <Image
+              source={require("../../../assets/images/postal_worker.png")}
+              style={{ width: width * 0.9, height: HERO_HEIGHT * 1 }}
+              resizeMode="contain"
             />
           </View>
+        </View>
 
-          {/* Divider */}
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Social Buttons */}
-          <SocialButton
-            svgXml={googleSvg}
-            label="Sign in with Google"
-            onPress={() => {}}
-          />
-          <SocialButton
-            svgXml={appleSvg}
-            label="Sign in with Apple"
-            onPress={() => {}}
-          />
-
-          {/* Fingerprint button uses downloaded SVG file directly */}
-          <TouchableOpacity
-            style={socialStyles.button}
-            activeOpacity={0.75}
-            onPress={() => {}}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.contentSection,
+            { paddingBottom: insets.bottom + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Animated.View
+            style={{ opacity: fadeIn, transform: [{ translateY: slideUp }] }}
           >
-            <View style={socialStyles.iconWrap}>
-              <Image
-                source={require("../../../assets/icons/fingerprint.png")}
-                style={{ width: 22, height: 22 }}
-                resizeMode="contain"
-              />
-            </View>
-            <Text style={socialStyles.label}>Biometric Sign in</Text>
-          </TouchableOpacity>
-
-          {/* Continue */}
-          <TouchableOpacity
-            style={styles.button}
-            activeOpacity={0.82}
-            onPress={() =>
-              navigation.navigate({
-                name: "OTPVerification",
-                params: { phone },
-              })
-            }
-          >
-            <Text style={styles.buttonText}>Continue</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.terms}>
-            By continuing, you agree to our{" "}
-            <Text style={styles.termsLink}>
-              terms and conditions and privacy policies
+            <Text style={styles.heading}>
+              {mode === "phone"
+                ? "Enter your number"
+                : mode === "login"
+                  ? "Welcome back"
+                  : "Create account"}
             </Text>
-            .
-          </Text>
-        </Animated.View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <Text style={styles.subtitle}>
+              {mode === "phone"
+                ? "We will send you a verification code on this number as SMS."
+                : mode === "login"
+                  ? "Enter your password to continue."
+                  : "Fill in your details to get started."}
+            </Text>
+
+            {mode === "register" && (
+              <View style={[styles.inputRow, { marginBottom: 12 }]}>
+                <TextInput
+                  style={[styles.phoneInput, { flex: 1 }]}
+                  placeholder="Full name"
+                  placeholderTextColor="#AAAAAA"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  autoCapitalize="words"
+                />
+              </View>
+            )}
+
+            <View style={styles.inputRow}>
+              <TouchableOpacity style={styles.countryPicker}>
+                <Text style={styles.flagEmoji}>🇬🇭</Text>
+                <Text style={styles.chevron}>▾</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={styles.phoneInput}
+                placeholder="+233"
+                placeholderTextColor="#AAAAAA"
+                keyboardType="phone-pad"
+                value={phone}
+                onChangeText={setPhone}
+                editable={mode === "phone"}
+              />
+              {mode !== "phone" && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setMode("phone");
+                    setPassword("");
+                  }}
+                  style={{ paddingHorizontal: 12 }}
+                >
+                  <Text
+                    style={{
+                      color: "#888",
+                      fontSize: 13,
+                      fontFamily: "Poppins-Regular",
+                    }}
+                  >
+                    Edit
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {(mode === "login" || mode === "register") && (
+              <View style={[styles.inputRow, { marginTop: 0 }]}>
+                <TextInput
+                  style={[styles.phoneInput, { flex: 1 }]}
+                  placeholder="Password"
+                  placeholderTextColor="#AAAAAA"
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={setPassword}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  style={{ paddingHorizontal: 14 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Image
+                    source={
+                      showPassword
+                        ? require("../../../assets/icons/eye-open.png")
+                        : require("../../../assets/icons/eye-closed.png")
+                    }
+                    style={{ width: 22, height: 22, tintColor: "#888" }}
+                    resizeMode="contain"
+                  />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {mode === "login" && (
+              <TouchableOpacity
+                onPress={() => navigation.navigate("ForgotPassword")}
+                style={{
+                  alignSelf: "flex-end",
+                  marginBottom: 8,
+                  marginTop: -4,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 13,
+                    color: Colors.primary,
+                  }}
+                >
+                  Forgot password?
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {mode !== "phone" && (
+              <TouchableOpacity
+                onPress={() => setMode(mode === "login" ? "register" : "login")}
+                style={{ alignItems: "center", marginBottom: 8 }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 13,
+                    color: "#555",
+                  }}
+                >
+                  {mode === "login"
+                    ? "Don't have an account? "
+                    : "Already have an account? "}
+                  <Text
+                    style={{
+                      color: Colors.primary,
+                      fontFamily: "Poppins-SemiBold",
+                    }}
+                  >
+                    {mode === "login" ? "Register" : "Log in"}
+                  </Text>
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {mode === "phone" && (
+              <>
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>Or</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+                <SocialButton
+                  svgXml={googleSvg}
+                  label="Sign in with Google"
+                  onPress={() => {}}
+                />
+                <TouchableOpacity
+                  style={socialStyles.button}
+                  activeOpacity={0.75}
+                  onPress={() => {}}
+                >
+                  <View style={socialStyles.iconWrap}>
+                    <Image
+                      source={require("../../../assets/icons/fingerprint.png")}
+                      style={{ width: 22, height: 22 }}
+                      resizeMode="contain"
+                    />
+                  </View>
+                  <Text style={socialStyles.label}>Biometric Sign in</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={[styles.button, isLoading && { opacity: 0.7 }]}
+              activeOpacity={0.82}
+              onPress={
+                mode === "phone"
+                  ? handleContinuePhone
+                  : mode === "login"
+                    ? handleLogin
+                    : handleRegister
+              }
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#0F1F3D" />
+              ) : (
+                <Text style={styles.buttonText}>
+                  {mode === "phone"
+                    ? "Continue"
+                    : mode === "login"
+                      ? "Log in"
+                      : "Register"}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.terms}>
+              By continuing, you agree to our{" "}
+              <Text style={styles.termsLink}>
+                terms and conditions and privacy policies
+              </Text>
+              .
+            </Text>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Account already exists modal */}
+      <ConfirmModal
+        visible={accountExistsModal}
+        title="Account exists"
+        message="This number is already registered. Would you like to log in instead?"
+        confirmLabel="Log in"
+        cancelLabel="Cancel"
+        variant="primary"
+        onConfirm={() => {
+          setAccountExistsModal(false);
+          setMode("login");
+        }}
+        onCancel={() => setAccountExistsModal(false)}
+      />
+    </>
   );
 }
 
@@ -221,23 +422,14 @@ const socialStyles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: Colors.white,
   },
-  iconWrap: {
-    width: 28,
-    alignItems: "center",
-    marginRight: 10,
-  },
-  label: {
-    fontFamily: "Poppins-Medium",
-    fontSize: 15,
-    color: "#0F1F3D",
-  },
+  iconWrap: { width: 28, alignItems: "center", marginRight: 10 },
+  label: { fontFamily: "Poppins-Medium", fontSize: 15, color: "#0F1F3D" },
 });
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white },
   scroll: { flex: 1 },
-
- heroSection: {
+  heroSection: {
     height: HERO_HEIGHT,
     alignItems: "center",
     justifyContent: "center",
@@ -252,21 +444,13 @@ const styles = StyleSheet.create({
     top: "22%",
     alignSelf: "center",
   },
-illustrationWrap: {
+  illustrationWrap: {
     width: "100%",
     height: HERO_HEIGHT,
     justifyContent: "center",
     alignItems: "center",
   },
-  illustration: {
-    width: width * 0.72,
-    height: HERO_HEIGHT * 0.92,
-  },
-
-  contentSection: {
-    paddingHorizontal: 24,
-    paddingTop: 28,
-  },
+  contentSection: { paddingHorizontal: 24, paddingTop: 28 },
   heading: {
     fontFamily: "HelveticaNeue-CondensedBold",
     fontSize: 26,
@@ -283,13 +467,12 @@ illustrationWrap: {
     lineHeight: 22,
     marginBottom: 20,
   },
-
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#F2F2F2",
     borderRadius: 14,
-    marginBottom: 20,
+    marginBottom: 12,
     overflow: "hidden",
   },
   countryPicker: {
@@ -310,12 +493,7 @@ illustrationWrap: {
     fontSize: 15,
     color: "#0F1F3D",
   },
-
-  dividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 20,
-  },
+  dividerRow: { flexDirection: "row", alignItems: "center", marginBottom: 20 },
   dividerLine: { flex: 1, height: 1, backgroundColor: "#E5E5E5" },
   dividerText: {
     fontFamily: "Poppins-Regular",
@@ -323,7 +501,6 @@ illustrationWrap: {
     color: "#888888",
     marginHorizontal: 12,
   },
-
   button: {
     backgroundColor: Colors.primary,
     borderRadius: Radius.md,
@@ -337,7 +514,6 @@ illustrationWrap: {
     fontSize: 16,
     color: "#0F1F3D",
   },
-
   terms: {
     fontFamily: "Poppins-Regular",
     fontSize: 12,
@@ -345,8 +521,5 @@ illustrationWrap: {
     textAlign: "center",
     lineHeight: 18,
   },
-  termsLink: {
-    color: "#555555",
-    textDecorationLine: "underline",
-  },
+  termsLink: { color: "#555555", textDecorationLine: "underline" },
 });

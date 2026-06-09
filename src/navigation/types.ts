@@ -9,6 +9,8 @@ export type RootStackParamList = {
   OTPVerification: { phone?: string };
   CreateProfile: undefined;
   BiometricSetup: undefined;
+  ForgotPassword: undefined;
+  ResetPassword: { phone: string };
   // Main
   MainTabs: undefined;
   // Modal flows (presented over tabs)
@@ -34,14 +36,21 @@ export type DeliveryStackParamList = {
   DeliveryDetails: {
     pickup: string;
     dropoff: string;
+    pickupCoords?: { latitude: number; longitude: number };
+    dropoffCoords?: { latitude: number; longitude: number };
+    isScheduled?: boolean;
     scheduledTime?: string;
   };
+
   SelectVehicle: {
     pickup: string;
     dropoff: string;
+    pickupCoords?: { latitude: number; longitude: number };
+    dropoffCoords?: { latitude: number; longitude: number };
     itemType: string;
-    weight: "lightweight" | "standard" | "heavy";
+    weight: string;
     specialInstructions?: string;
+    isScheduled?: boolean;
     scheduledTime?: string;
   };
   ReviewDelivery: {
@@ -56,6 +65,7 @@ export type DeliveryStackParamList = {
     scheduledTime?: string;
     scheduledDate?: string;
     paymentMethod?: string;
+    isScheduled?: boolean;
   };
   PayWith: {
     vehicleType: "bicycle" | "e-motorcycle";
@@ -65,17 +75,18 @@ export type DeliveryStackParamList = {
   };
   AddPaymentMethod: undefined;
   // Tracking
-  RiderMatching:
-    | {
-        pickup?: string;
-        dropoff?: string;
-        itemType?: string;
-        weight?: "lightweight" | "standard" | "heavy";
-        vehicleType?: "bicycle" | "e-motorcycle";
-        specialInstructions?: string;
-        paymentMethod?: string;
-      }
-    | undefined;
+  RiderMatching: {
+    pickup?: string;
+    dropoff?: string;
+    itemType?: string;
+    orderId: string;
+    weight?: "lightweight" | "standard" | "heavy";
+    vehicleType?: "bicycle" | "e-motorcycle";
+    specialInstructions?: string;
+    paymentMethod?: string;
+    pickupCoords?: { latitude: number; longitude: number };
+    dropoffCoords?: { latitude: number; longitude: number };
+  };
   RiderFound: {
     riderName?: string;
     riderPlate?: string;
@@ -114,6 +125,8 @@ export type DeliveryStackParamList = {
     riderName?: string;
     riderRating?: number;
     itemType?: string;
+    isScheduled?: boolean;
+    scheduledTime?: string;
   };
   AddMobileMoney: undefined;
   AddCard: undefined;

@@ -1,16 +1,21 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  ScrollView,
   Animated,
   StatusBar,
   Image,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
+import { useBundleProducts, useActiveBundle } from "../../hooks/useApi";
+import { BundleProduct } from "../../api/bundles";
+import WalletSvg from "../../assets/icons/medal_icon.svg";
 
 const Colors = {
   white: "#FFFFFF",
@@ -23,19 +28,26 @@ const Colors = {
   inputBg: "#F2F4F7",
 };
 
-const CURRENT_PLAN = {
-  id: "starter",
-  name: "Starter Pack",
-  deliveries: "5 Deliveries",
-  expiry: "Expires in 30 days",
-  price: "GHS 75.00",
-  priceNum: 75,
-};
-
 export default function TopupScreen() {
   const navigation = useNavigation<any>();
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(16)).current;
+
+  const { data: activeBundleRes } = useActiveBundle();
+  const { data: productsRes, isLoading } = useBundleProducts();
+
+  const activeBundle = activeBundleRes?.data;
+  const products: BundleProduct[] = productsRes?.data ?? [];
+
+  // Default to same product as active bundle
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (activeBundle?.product?.id) {
+      setSelectedId(activeBundle.product.id);
+    } else if (products.length) {
+      setSelectedId(products[0].id);
+    }
+  }, [activeBundle, products]);
 
   useEffect(() => {
     Animated.parallel([
@@ -53,23 +65,23 @@ export default function TopupScreen() {
     ]).start();
   }, []);
 
+  const selectedPlan = products.find((p) => p.id === selectedId);
+
   const handleProceed = () => {
-    navigation.navigate("DeliveryFlow", {
-      screen: "PayWith",
-      params: {
-        vehicleType: "bicycle",
-        price: CURRENT_PLAN.priceNum,
-        pickup: "",
-        dropoff: "",
-      },
+    if (!selectedPlan) return;
+    navigation.navigate("BundlesFlow", {
+      screen: "BundlePayment",
+      params: { plan: selectedPlan },
     });
   };
+
+  const displayPlan: BundleProduct | undefined =
+    selectedPlan ?? activeBundle?.product;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={Colors.white} />
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
@@ -82,51 +94,126 @@ export default function TopupScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      <Text style={styles.subtitle}>Current Plan</Text>
+      <Text style={styles.subtitle}>
+        {activeBundle ? "Current Plan" : "Choose a Plan"}
+      </Text>
 
-      <Animated.View
-        style={[
-          styles.content,
-          { opacity: fadeIn, transform: [{ translateY: slideUp }] },
-        ]}
-      >
-        <View style={styles.planCard}>
-          {/*
-            Replace with:
-          */}
-          {/* <Image
-            source={{ uri: 'https://via.placeholder.com/56x56/F5F5F5/888.png?text=🏅' }}
-            style={styles.medalImg}
-            resizeMode="contain"
-          /> */}
-          <Image
-            source={require("../../assets/images/medal_icon.png")}
-            style={styles.medalImg}
-            resizeMode="contain"
-          />
-
-          <View style={styles.planInfo}>
-            <Text style={styles.planName}>{CURRENT_PLAN.name}</Text>
-            <Text style={styles.planDeliveries}>{CURRENT_PLAN.deliveries}</Text>
-            <Text style={styles.planExpiry}>{CURRENT_PLAN.expiry}</Text>
-          </View>
-
-          <Text style={styles.planPrice}>{CURRENT_PLAN.price}</Text>
-
-          {/* Always-selected radio */}
-          <View style={styles.radioOuter}>
-            <View style={styles.radioInner} />
-          </View>
+      {isLoading ? (
+        <View
+          style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+        >
+          <ActivityIndicator size="large" color={Colors.navy} />
         </View>
-      </Animated.View>
+      ) : (
+        <Animated.View
+          style={[
+            { flex: 1, paddingHorizontal: 20 },
+            { opacity: fadeIn, transform: [{ translateY: slideUp }] },
+          ]}
+        >
+          {/* If multiple plans, show picker; otherwise single card */}
+          {products.length > 1 ? (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 100 }}
+            >
+              {products.map((plan) => (
+                <TouchableOpacity
+                  key={plan.id}
+                  style={[
+                    styles.planCard,
+                    selectedId === plan.id && styles.planCardSelected,
+                  ]}
+                  onPress={() => setSelectedId(plan.id)}
+                  activeOpacity={0.82}
+                >
+                  <Image
+                    source={require("../../assets/images/medal_icon.png")}
+                    style={styles.medalImg}
+                    resizeMode="contain"
+                  />
+                  <View style={styles.planInfo}>
+                    <Text style={styles.planName}>{plan.name}</Text>
+                    <Text style={styles.planDeliveries}>
+                      {plan.credits} Deliveries
+                    </Text>
+                    <Text style={styles.planExpiry}>
+                      Expires in {plan.validity_days} days
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: "flex-end", gap: 8 }}>
+                    <Text style={styles.planPrice}>
+                      GHS {plan.price_ghs.toFixed(2)}
+                    </Text>
+                    <View
+                      style={[
+                        styles.radioOuter,
+                        selectedId === plan.id && styles.radioOuterActive,
+                      ]}
+                    >
+                      {selectedId === plan.id && (
+                        <View style={styles.radioInner} />
+                      )}
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : displayPlan ? (
+            <View style={[styles.planCard, styles.planCardSelected]}>
+              <Image
+                source={require("../../assets/images/medal_icon.png")}
+                style={styles.medalImg}
+                resizeMode="contain"
+              />
+              <View style={styles.planInfo}>
+                <Text style={styles.planName}>{displayPlan.name}</Text>
+                <Text style={styles.planDeliveries}>
+                  {displayPlan.credits} Deliveries
+                </Text>
+                <Text style={styles.planExpiry}>
+                  Expires in {displayPlan.validity_days} days
+                </Text>
+              </View>
+              <Text style={styles.planPrice}>
+                GHS {displayPlan.price_ghs.toFixed(2)}
+              </Text>
+              <View style={styles.radioOuter}>
+                <View style={styles.radioInner} />
+              </View>
+            </View>
+          ) : (
+            <View style={styles.emptyWrap}>
+              <View style={styles.emptyIconRing}>
+                {/* your WalletSvg or a bundle icon */}
+                <WalletSvg width={38} height={38} />
+              </View>
+              <Text style={styles.emptyTitle}>No plans available</Text>
+              <Text style={styles.emptyDesc}>
+                Bundle plans aren't set up yet.{"\n"}Check back soon or contact
+                support.
+              </Text>
+              <TouchableOpacity
+                onPress={() =>
+                  navigation.getParent("AccountStack")?.navigate("Support")
+                }
+                style={styles.emptyCta}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.emptyCtaText}>Contact support</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </Animated.View>
+      )}
 
       <View style={{ flex: 1 }} />
-
       <View style={styles.footer}>
         <TouchableOpacity
-          style={styles.proceedBtn}
+          style={[styles.proceedBtn, !selectedPlan && { opacity: 0.6 }]}
           onPress={handleProceed}
           activeOpacity={0.85}
+          disabled={!selectedPlan}
         >
           <Text style={styles.proceedBtnText}>Proceed</Text>
         </TouchableOpacity>
@@ -137,7 +224,6 @@ export default function TopupScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white },
-
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -161,7 +247,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   headerSpacer: { width: 32 },
-
   subtitle: {
     fontFamily: "Poppins-Regular",
     fontSize: 14,
@@ -169,26 +254,20 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 20,
   },
-
-  content: {
-    paddingHorizontal: 20,
-  },
-
   planCard: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: Colors.navy,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
     borderRadius: 16,
     paddingVertical: 18,
     paddingHorizontal: 16,
+    marginBottom: 12,
     gap: 12,
     backgroundColor: Colors.white,
   },
-  medalImg: {
-    width: 56,
-    height: 56,
-  },
+  planCardSelected: { borderColor: Colors.navy, borderWidth: 2 },
+  medalImg: { width: 56, height: 56 },
   planInfo: { flex: 1 },
   planName: {
     fontFamily: "HelveticaNeue-CondensedBold",
@@ -224,13 +303,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  radioOuterActive: {
+    borderColor: Colors.navy, // selected overrides
+    backgroundColor: Colors.navy,
+  },
   radioInner: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: Colors.white,
   },
-
   footer: {
     paddingHorizontal: 20,
     paddingBottom: Platform.OS === "ios" ? 36 : 24,
@@ -245,9 +327,52 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   proceedBtnText: {
-    fontFamily: "HelveticaNeue-CondensedBold",
-    fontSize: 17,
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 15,
     color: Colors.textPrimary,
     letterSpacing: 0.3,
+  },
+  emptyWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingBottom: 80,
+    gap: 0,
+  },
+  emptyIconRing: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#EEF1F6",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 20,
+  },
+  emptyTitle: {
+    fontFamily: "HelveticaNeue-CondensedBold",
+    fontSize: 18,
+    color: Colors.textPrimary,
+    marginBottom: 8,
+  },
+  emptyDesc: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 13,
+    color: Colors.textMuted,
+    textAlign: "center",
+    lineHeight: 20,
+    maxWidth: 220,
+    marginBottom: 28,
+  },
+  emptyCta: {
+    backgroundColor: Colors.navy,
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 32,
+  },
+  emptyCtaText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.primary,
+    letterSpacing: 0.2,
   },
 });

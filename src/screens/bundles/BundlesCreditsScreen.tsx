@@ -1,75 +1,130 @@
-import React, { useRef, useEffect, useState } from 'react';
+/**
+ * BundlesCreditsScreen.tsx — FIXED
+ *
+ * Fixes applied:
+ *  1. `ordersRes?.data?.items` (was `.orders` — API returns `items`)
+ *  2. `useActiveBundle` 404 is now handled gracefully (treat as "no bundle")
+ *  3. Guard added so a 404 never surfaces as a red error state
+ */
+
+import React, { useRef, useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
   Animated,
   StatusBar,
   Dimensions,
   Image,
   Platform,
-} from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import Svg, { Path, Defs, LinearGradient as SvgGradient, Stop, Polyline as SvgPolyline } from 'react-native-svg';
-import ArrowBackSvg from '../../assets/icons/arrow_back.svg';
-import TopupIconSvg from '../../assets/icons/topup_icon.svg';
-import RenewIconSvg from '../../assets/icons/renew_icon.svg';
-import HistoryIconSvg from '../../assets/icons/history_icon.svg';
+  ActivityIndicator,
+} from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import Svg, {
+  Path,
+  Defs,
+  LinearGradient as SvgGradient,
+  Stop,
+  Polyline as SvgPolyline,
+} from "react-native-svg";
+import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
+import TopupIconSvg from "../../assets/icons/topup_icon.svg";
+import RenewIconSvg from "../../assets/icons/renew_icon.svg";
+import HistoryIconSvg from "../../assets/icons/history_icon.svg";
+import { useActiveBundle, useMyOrders } from "../../hooks/useApi";
 
-const { width } = Dimensions.get('window');
+const { width } = Dimensions.get("window");
 const CHART_W = width - 40 - 28;
 const CHART_H = 140;
 
 const Colors = {
-  white: '#FFFFFF',
-  navy: '#0B1F3A',
-  primary: '#4CD964',
-  textPrimary: '#1A1A2E',
-  textSecondary: '#5A6478',
-  textMuted: '#9CA3AF',
-  border: '#EFEFEF',
-  inputBg: '#F2F4F7',
-  red: '#FF6B6B',
-  creditRed: '#E05252',
+  white: "#FFFFFF",
+  navy: "#0B1F3A",
+  primary: "#4CD964",
+  textPrimary: "#1A1A2E",
+  textSecondary: "#5A6478",
+  textMuted: "#9CA3AF",
+  border: "#EFEFEF",
+  inputBg: "#F2F4F7",
+  red: "#FF6B6B",
+  creditRed: "#E05252",
 };
 
-const CHART_DATA = [2200, 1800, 2500, 3800, 5500, 6200, 7800, 9000, 8500, 10500, 11200, 12800, 11500, 13500];
-const DAY_LABELS = ['Mon\n15', 'Tue\n16', 'Wed\n17', 'Thu\n18', 'Fri\n19', 'Sat\n20', 'Sun\n21', 'Mon\n22'];
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Mon"];
 
-const RECENT = [
-  { id: '1', destination: 'University of Ghana', date: '20 May . 12:34', amount: 'GHS 24', credit: '1 credit' },
-  { id: '2', destination: 'ANYAA NIC BUS STOP', date: '18 May . 09:15', amount: 'GHS 24', credit: '1 credit' },
-];
+function daysUntil(dateStr: string) {
+  const now = new Date();
+  const exp = new Date(dateStr);
+  return Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / 86400000));
+}
 
 export default function BundlesCreditsScreen() {
   const navigation = useNavigation<any>();
-  const [period] = useState('Weekly');
+  const [period] = useState("Weekly");
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(16)).current;
   const cardScale = useRef(new Animated.Value(0.96)).current;
 
+  // ─── FIX 1: handle 404 gracefully ────────────────────────────────────────
+  // If useActiveBundle throws on 404, wrap with enabled flag or catch in hook.
+  // Here we guard by treating any error as "no bundle" via `isError`.
+  const {
+    data: activeBundleRes,
+    isLoading: bundleLoading,
+    isError: bundleError,
+  } = useActiveBundle();
+
+  // ─── FIX 2: API returns `items`, not `orders` ─────────────────────────────
+  const { data: ordersRes } = useMyOrders({ status: "delivered", limit: 20 });
+
+  // 404 means no active bundle — not a real error, just treat as null
+  const activeBundle = bundleError ? null : activeBundleRes?.data;
+
+  // API returns data.items (not data.orders)
+  const recentOrders =
+    (ordersRes?.data as any)?.items ?? (ordersRes?.data as any)?.orders ?? [];
+
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }),
-      Animated.spring(slideUp, { toValue: 0, tension: 55, friction: 10, useNativeDriver: true }),
-      Animated.spring(cardScale, { toValue: 1, tension: 60, friction: 9, delay: 80, useNativeDriver: true }),
+      Animated.timing(fadeIn, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideUp, {
+        toValue: 0,
+        tension: 55,
+        friction: 10,
+        useNativeDriver: true,
+      }),
+      Animated.spring(cardScale, {
+        toValue: 1,
+        tension: 60,
+        friction: 9,
+        delay: 80,
+        useNativeDriver: true,
+      }),
     ]).start();
   }, []);
 
+  const CHART_DATA = [
+    2200, 1800, 2500, 3800, 5500, 6200, 7800, 9000, 8500, 10500, 11200, 12800,
+    11500, 13500,
+  ];
   const maxVal = Math.max(...CHART_DATA);
   const points = CHART_DATA.map((v, i) => {
     const x = (i / (CHART_DATA.length - 1)) * CHART_W;
     const y = CHART_H - (v / maxVal) * CHART_H * 0.85;
     return `${x},${y}`;
-  }).join(' ');
+  }).join(" ");
+
+  const expiryDays = activeBundle ? daysUntil(activeBundle.expires_at) : 0;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={Colors.white} />
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
@@ -88,41 +143,119 @@ export default function BundlesCreditsScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Dark Plan Card */}
-        <Animated.View style={[styles.planCard, { transform: [{ scale: cardScale }] }]}>
-          <Text style={styles.planName}>Starter Plan</Text>
-          <Text style={styles.planCount}>3</Text>
-          <Text style={styles.planSubtitle}>Deliveries left</Text>
-          <Text style={styles.planExpiry}>
-            Expires in <Text style={styles.planExpiryRed}>10 days</Text>
-          </Text>
+        <Animated.View
+          style={[styles.planCard, { transform: [{ scale: cardScale }] }]}
+        >
+          {bundleLoading ? (
+            <ActivityIndicator color={Colors.primary} size="large" />
+          ) : activeBundle ? (
+            <>
+              <Text style={styles.planName}>
+                {activeBundle.product?.name ?? "Bundle"}
+              </Text>
+              <Text style={styles.planCount}>
+                {activeBundle.credits_remaining}
+              </Text>
+              <Text style={styles.planSubtitle}>Deliveries left</Text>
+              <Text style={styles.planExpiry}>
+                Expires in{" "}
+                <Text
+                  style={[
+                    styles.planExpiryRed,
+                    expiryDays <= 7 && { color: Colors.red },
+                  ]}
+                >
+                  {expiryDays} day{expiryDays !== 1 ? "s" : ""}
+                </Text>
+              </Text>
+            </>
+          ) : (
+            // ─── FIX 3: clean empty state instead of error ─────────────────
+            <>
+              <View
+                style={{
+                  backgroundColor: "rgba(76,217,100,0.15)",
+                  borderRadius: 20,
+                  paddingHorizontal: 14,
+                  paddingVertical: 4,
+                  marginBottom: 8,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 12,
+                    color: Colors.primary,
+                  }}
+                >
+                  No Active Bundle
+                </Text>
+              </View>
+              <Text
+                style={[styles.planCount, { color: "rgba(255,255,255,0.15)" }]}
+              >
+                0
+              </Text>
+              <Text style={styles.planSubtitle}>
+                You have no deliveries left
+              </Text>
+              <TouchableOpacity
+                style={{
+                  marginTop: 12,
+                  backgroundColor: Colors.primary,
+                  borderRadius: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 24,
+                }}
+                onPress={() =>
+                  navigation.navigate("BundlesFlow", { screen: "Topup" })
+                }
+              >
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 13,
+                    color: Colors.navy,
+                  }}
+                >
+                  Get a bundle →
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </Animated.View>
 
         {/* Quick Actions */}
         <View style={styles.actionsCard}>
           <TouchableOpacity
             style={styles.actionBtn}
-            onPress={() => navigation.navigate('BundlesFlow', { screen: 'Topup' })}
+            onPress={() =>
+              navigation.navigate("BundlesFlow", { screen: "Topup" })
+            }
             activeOpacity={0.7}
           >
-            {/* Replace with: <TopupIconSvg width={28} height={28} /> */}
             <TopupIconSvg width={28} height={28} />
             <Text style={styles.actionLabel}>Topup</Text>
           </TouchableOpacity>
-
           <View style={styles.actionDivider} />
-
           <TouchableOpacity
             style={styles.actionBtn}
-            onPress={() => navigation.navigate('BundlesFlow', { screen: 'Renew' })}
+            onPress={() =>
+              navigation.navigate("BundlesFlow", { screen: "Renew" })
+            }
             activeOpacity={0.7}
           >
             <RenewIconSvg width={28} height={28} />
             <Text style={styles.actionLabel}>Renew</Text>
           </TouchableOpacity>
-
           <View style={styles.actionDivider} />
-
-          <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('BundlesFlow', { screen: 'BundleHistory' })}activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={() =>
+              navigation.navigate("BundlesFlow", { screen: "BundleHistory" })
+            }
+            activeOpacity={0.7}
+          >
             <HistoryIconSvg width={28} height={28} />
             <Text style={styles.actionLabel}>History</Text>
           </TouchableOpacity>
@@ -133,25 +266,31 @@ export default function BundlesCreditsScreen() {
           <View style={styles.overviewHeader}>
             <Text style={styles.overviewTitle}>Overview</Text>
             <TouchableOpacity style={styles.periodBtn} activeOpacity={0.75}>
-              <Text style={styles.periodText}>{period}  ▾</Text>
+              <Text style={styles.periodText}>{period} ▾</Text>
             </TouchableOpacity>
           </View>
-
           <View style={styles.chartWrap}>
-            {/* Y labels */}
             <View style={styles.yLabels}>
-              {['15k', '12k', '9k', '6k', '3k', '0k'].map((l) => (
-                <Text key={l} style={styles.yLabel}>{l}</Text>
+              {["15k", "12k", "9k", "6k", "3k", "0k"].map((l) => (
+                <Text key={l} style={styles.yLabel}>
+                  {l}
+                </Text>
               ))}
             </View>
-
-            {/* Chart */}
             <View style={{ flex: 1 }}>
               <Svg width={CHART_W} height={CHART_H + 10}>
                 <Defs>
                   <SvgGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                    <Stop offset="0" stopColor={Colors.navy} stopOpacity="0.15" />
-                    <Stop offset="1" stopColor={Colors.navy} stopOpacity="0.01" />
+                    <Stop
+                      offset="0"
+                      stopColor={Colors.navy}
+                      stopOpacity="0.15"
+                    />
+                    <Stop
+                      offset="1"
+                      stopColor={Colors.navy}
+                      stopOpacity="0.01"
+                    />
                   </SvgGradient>
                 </Defs>
                 <Path
@@ -167,47 +306,98 @@ export default function BundlesCreditsScreen() {
                   strokeLinecap="round"
                 />
               </Svg>
-
-              {/* X labels */}
               <View style={styles.xLabels}>
                 {DAY_LABELS.map((l, i) => (
-                  <Text key={i} style={styles.xLabel}>{l}</Text>
+                  <Text key={i} style={styles.xLabel}>
+                    {l}
+                  </Text>
                 ))}
               </View>
             </View>
           </View>
         </View>
 
-        {/* Recent */}
+        {/* Recent deliveries */}
         <Text style={styles.recentTitle}>Recent</Text>
-        {RECENT.map((item, index) => (
-          <View
-            key={item.id}
-            style={[
-              styles.recentRow,
-              index < RECENT.length - 1 && styles.recentRowBorder,
-            ]}
-          >
-            {/*
-              Replace with:
-              <Image source={require('../../assets/images/bicycle_small.png')} style={styles.recentVehicleImg} resizeMode="contain" />
-            */}
-            <Image
-              source={{ uri: 'https://via.placeholder.com/44x36/F5F5F5/888.png?text=🚲' }}
-              style={styles.recentVehicleImg}
-              resizeMode="contain"
-            />
-            <View style={styles.recentInfo}>
-              <Text style={styles.recentDest}>{item.destination}</Text>
-              <View style={styles.recentMeta}>
-                <Text style={styles.recentDate}>{item.date}</Text>
-                <Text style={styles.recentAmount}>{item.amount}</Text>
-              </View>
+        {recentOrders.length === 0 ? (
+          <View style={{ alignItems: "center", paddingVertical: 20, gap: 8 }}>
+            <View
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                backgroundColor: Colors.inputBg,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <HistoryIconSvg width={22} height={22} />
             </View>
-            <Text style={styles.recentCredit}>{item.credit}</Text>
+            <Text
+              style={{
+                fontFamily: "Poppins-SemiBold",
+                fontSize: 14,
+                color: Colors.textPrimary,
+              }}
+            >
+              No deliveries yet
+            </Text>
+            <Text
+              style={{
+                fontFamily: "Poppins-Regular",
+                fontSize: 12,
+                color: Colors.textMuted,
+                textAlign: "center",
+                maxWidth: 220,
+                lineHeight: 18,
+              }}
+            >
+              Your recent deliveries will appear here once you start using a
+              bundle.
+            </Text>
           </View>
-        ))}
-
+        ) : (
+          recentOrders.slice(0, 5).map((item: any, index: any) => (
+            <View
+              key={item.id}
+              style={[
+                styles.recentRow,
+                index < Math.min(recentOrders.length, 5) - 1 &&
+                  styles.recentRowBorder,
+              ]}
+            >
+              <Image
+                source={
+                  item.vehicle_type === "bicycle"
+                    ? require("../../assets/images/bicycle_small.png")
+                    : require("../../assets/images/emoto_small.png")
+                }
+                style={styles.recentVehicleImg}
+                resizeMode="contain"
+              />
+              <View style={styles.recentInfo}>
+                <Text style={styles.recentDest}>{item.dropoff_address}</Text>
+                <View style={styles.recentMeta}>
+                  <Text style={styles.recentDate}>
+                    {new Date(item.created_at).toLocaleDateString("en", {
+                      day: "numeric",
+                      month: "short",
+                    })}
+                    {" · "}
+                    {new Date(item.created_at).toLocaleTimeString("en", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </Text>
+                  <Text style={styles.recentAmount}>
+                    GHS {item.price_ghs?.toFixed(0)}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.recentCredit}>-1 credit</Text>
+            </View>
+          ))
+        )}
         <View style={{ height: 48 }} />
       </Animated.ScrollView>
     </View>
@@ -216,96 +406,81 @@ export default function BundlesCreditsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white },
-
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 56 : 40,
+    paddingTop: Platform.OS === "ios" ? 56 : 40,
     paddingBottom: 14,
     backgroundColor: Colors.white,
   },
   backBtn: {
     width: 32,
     height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: {
     flex: 1,
-    textAlign: 'center',
-    fontFamily: 'HelveticaNeue-CondensedBold',
+    textAlign: "center",
+    fontFamily: "HelveticaNeue-CondensedBold",
     fontSize: 19,
     color: Colors.textPrimary,
     letterSpacing: 0.2,
   },
   headerSpacer: { width: 32 },
-
-  scroll: {
-    paddingHorizontal: 20,
-    paddingTop: 4,
-  },
-
-  // Plan card
+  scroll: { paddingHorizontal: 20, paddingTop: 4 },
   planCard: {
     backgroundColor: Colors.navy,
     borderRadius: 20,
     paddingVertical: 28,
     paddingHorizontal: 24,
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 16,
+    minHeight: 160,
+    justifyContent: "center",
   },
   planName: {
-    fontFamily: 'Poppins-SemiBold',
+    fontFamily: "Poppins-SemiBold",
     fontSize: 15,
     color: Colors.primary,
     marginBottom: 8,
   },
   planCount: {
-    fontFamily: 'HelveticaNeue-CondensedBold',
+    fontFamily: "HelveticaNeue-CondensedBold",
     fontSize: 80,
     color: Colors.white,
     lineHeight: 86,
     letterSpacing: -2,
   },
   planSubtitle: {
-    fontFamily: 'Poppins-SemiBold',
+    fontFamily: "Poppins-SemiBold",
     fontSize: 15,
     color: Colors.white,
     marginBottom: 6,
   },
   planExpiry: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: "Poppins-Regular",
     fontSize: 13,
-    color: 'rgba(255,255,255,0.75)',
+    color: "rgba(255,255,255,0.75)",
   },
-  planExpiryRed: {
-    color: Colors.red,
-    fontFamily: 'Poppins-SemiBold',
-  },
-
-  // Actions
+  planExpiryRed: { color: "#FF6B6B", fontFamily: "Poppins-SemiBold" },
   actionsCard: {
-    flexDirection: 'row',
+    flexDirection: "row",
     backgroundColor: Colors.white,
     borderRadius: 16,
     marginBottom: 24,
     borderWidth: 1,
     borderColor: Colors.border,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 2,
   },
-  actionBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 16,
-    gap: 6,
-  },
+  actionBtn: { flex: 1, alignItems: "center", paddingVertical: 16, gap: 6 },
   actionLabel: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: "Poppins-Regular",
     fontSize: 13,
     color: Colors.textSecondary,
   },
@@ -314,18 +489,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
     marginVertical: 12,
   },
-
-  // Chart
   overviewSection: { marginBottom: 24 },
   overviewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 14,
   },
   overviewTitle: {
-    fontFamily: 'HelveticaNeue-CondensedBold',
-    fontSize: 18,
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 17,
     color: Colors.textPrimary,
     letterSpacing: 0.1,
   },
@@ -336,88 +509,72 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   periodText: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: "Poppins-Regular",
     fontSize: 13,
     color: Colors.textPrimary,
   },
-  chartWrap: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
+  chartWrap: { flexDirection: "row", alignItems: "flex-start" },
   yLabels: {
     width: 28,
     height: CHART_H + 10,
-    justifyContent: 'space-between',
+    justifyContent: "space-between",
     paddingVertical: 2,
   },
   yLabel: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: "Poppins-Regular",
     fontSize: 10,
     color: Colors.textMuted,
-    textAlign: 'right',
+    textAlign: "right",
   },
   xLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginTop: 6,
   },
   xLabel: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: "Poppins-Regular",
     fontSize: 9,
     color: Colors.textMuted,
-    textAlign: 'center',
+    textAlign: "center",
     flex: 1,
   },
-
-  // Recent
   recentTitle: {
-    fontFamily: 'HelveticaNeue-CondensedBold',
-    fontSize: 18,
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 17,
     color: Colors.textPrimary,
     marginBottom: 12,
     letterSpacing: 0.1,
   },
   recentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 14,
     gap: 12,
   },
-  recentRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  recentVehicleImg: {
-    width: 44,
-    height: 36,
-  },
+  recentRowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.border },
+  recentVehicleImg: { width: 44, height: 36 },
   recentInfo: { flex: 1 },
   recentDest: {
-    fontFamily: 'Poppins-SemiBold',
+    fontFamily: "Poppins-SemiBold",
     fontSize: 14,
     color: Colors.textPrimary,
     marginBottom: 3,
   },
-  recentMeta: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
+  recentMeta: { flexDirection: "row", gap: 8, alignItems: "center" },
   recentDate: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: "Poppins-Regular",
     fontSize: 12,
     color: Colors.textMuted,
   },
   recentAmount: {
-    fontFamily: 'HelveticaNeue-CondensedBold',
+    fontFamily: "HelveticaNeue-CondensedBold",
     fontSize: 13,
     color: Colors.textPrimary,
     letterSpacing: 0.1,
   },
   recentCredit: {
-    fontFamily: 'Poppins-SemiBold',
+    fontFamily: "Poppins-SemiBold",
     fontSize: 13,
     color: Colors.creditRed,
   },
 });
-

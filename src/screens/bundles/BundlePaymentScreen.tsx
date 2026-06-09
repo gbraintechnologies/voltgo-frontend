@@ -9,10 +9,16 @@ import {
   Platform,
   ActivityIndicator,
   Image,
+  Alert,
 } from "react-native";
-import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
 import WalletSvg from "../../assets/icons/medal_icon.svg";
+import { usePurchaseBundle, usePaymentOptions } from "../../hooks/useApi";
+import { ApiError } from "../../api/client";
+import { BundleProduct } from "../../api/bundles";
+import { useToast } from "@/components/common/Toast";
+import * as Haptics from "expo-haptics";
 
 const Colors = {
   white: "#FFFFFF",
@@ -22,38 +28,34 @@ const Colors = {
   textSecondary: "#5A6478",
   textMuted: "#9CA3AF",
   border: "#EFEFEF",
+  inputBg: "#eeeeee",
 };
-
-const PAYMENT_OPTIONS = [
-  {
-    id: "bundle",
-    label: "Bundle Credits",
-    sub: "3 deliveries left",
-    logo: null, // uses WalletSvg
-  },
-  {
-    id: "mtn",
-    label: "MTN MoMo",
-    sub: "0546785064",
-    logo: require("../../assets/images/mtn_logo.png"),
-  },
-  {
-    id: "visa",
-    label: "Visa Card",
-    sub: "•••• 7765",
-    logo: require("../../assets/images/visa_logo.png"),
-  },
-];
 
 export default function BundlePaymentScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { plan } = route.params ?? {};
+  const plan: BundleProduct | undefined = route.params?.plan;
 
-  const [selectedPayment, setSelectedPayment] = useState("mtn");
-  const [loading, setLoading] = useState(false);
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(
+    null,
+  );
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(16)).current;
+
+  const { data: optionsRes, isLoading: optionsLoading } = usePaymentOptions();
+  const purchaseMutation = usePurchaseBundle();
+
+  const paymentOptions = optionsRes?.data ?? [];
+
+  const toast = useToast();
+
+  useEffect(() => {
+    if (paymentOptions.length && !selectedPaymentId) {
+      const def =
+        paymentOptions.find((p: any) => p.is_default) ?? paymentOptions[0];
+      if (def) setSelectedPaymentId(def.id);
+    }
+  }, [paymentOptions]);
 
   useEffect(() => {
     Animated.parallel([
@@ -71,11 +73,23 @@ export default function BundlePaymentScreen() {
     ]).start();
   }, []);
 
-  const handleConfirm = async () => {
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 1400));
-    setLoading(false);
-    navigation.navigate("BundleSuccess", { plan });
+  const handleConfirmPayment = async () => {
+    if (!plan) return;
+    try {
+      await purchaseMutation.mutateAsync({
+        bundle_product_id: plan.id,
+        auto_renew: false,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      navigation.navigate("BundleSuccess");
+    } catch (err) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      toast.error(
+        err instanceof ApiError
+          ? err.message
+          : "Purchase failed. Please try again.",
+      );
+    }
   };
 
   return (
@@ -99,87 +113,177 @@ export default function BundlePaymentScreen() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* Order summary */}
-        <Text style={styles.sectionTitle}>Order Summary</Text>
-
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Plan</Text>
-            <Text style={styles.summaryValue}>
-              {plan?.name ?? "Starter Pack"}
-            </Text>
-          </View>
-          <View style={[styles.summaryRow, styles.summaryRowBorder]}>
-            <Text style={styles.summaryLabel}>Deliveries</Text>
-            <Text style={styles.summaryValue}>
-              {plan?.deliveries ?? 5} deliveries
-            </Text>
-          </View>
-          <View style={[styles.summaryRow, styles.summaryRowBorder]}>
-            <Text style={styles.summaryLabel}>Valid for</Text>
-            <Text style={styles.summaryValue}>{plan?.expiry ?? "30 days"}</Text>
-          </View>
-          <View style={[styles.summaryRow, styles.summaryRowBorder]}>
-            <Text style={styles.summaryLabel}>Total</Text>
-            <Text style={styles.summaryTotal}>
-              {plan?.price ?? "GHS 75.00"}
-            </Text>
-          </View>
-        </View>
-
-        {/* Pay with */}
-        <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Pay With</Text>
-
-        {PAYMENT_OPTIONS.map((opt, index) => (
-          <TouchableOpacity
-            key={opt.id}
-            style={[
-              styles.paymentRow,
-              index < PAYMENT_OPTIONS.length - 1 && styles.paymentRowBorder,
-              selectedPayment === opt.id && styles.paymentRowActive,
-            ]}
-            onPress={() => setSelectedPayment(opt.id)}
-            activeOpacity={0.75}
-          >
-            <View style={styles.paymentIconWrap}>
-              {opt.logo ? (
-                <Image
-                  source={opt.logo}
-                  style={styles.paymentLogo}
-                  resizeMode="contain"
-                />
-              ) : (
-                <WalletSvg width={30} height={28} />
-              )}
+        {/* Plan summary */}
+        {plan && (
+          <View style={styles.planSummary}>
+            <WalletSvg width={44} height={44} />
+            <View style={styles.planSummaryInfo}>
+              <Text style={styles.planSummaryName}>{plan.name}</Text>
+              <Text style={styles.planSummaryDetail}>
+                {plan.credits} deliveries · {plan.validity_days} days
+              </Text>
             </View>
-            <View style={styles.paymentInfo}>
-              <Text style={styles.paymentLabel}>{opt.label}</Text>
-              <Text style={styles.paymentSub}>{opt.sub}</Text>
-            </View>
+            <Text style={styles.planSummaryPrice}>
+              GHS {plan.price_ghs.toFixed(2)}
+            </Text>
+          </View>
+        )}
+
+        <Text style={styles.sectionTitle}>Pay with</Text>
+
+        {optionsLoading ? (
+          <ActivityIndicator
+            size="large"
+            color={Colors.navy}
+            style={{ marginTop: 20 }}
+          />
+        ) : paymentOptions.length === 0 ? (
+          <View style={styles.emptyPayment}>
             <View
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 36,
+                backgroundColor: Colors.inputBg,
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 8,
+              }}
+            >
+              <WalletSvg width={30} height={30} />
+            </View>
+            <Text
+              style={{
+                fontFamily: "HelveticaNeue-CondensedBold",
+                fontSize: 17,
+                color: Colors.textPrimary,
+              }}
+            >
+              No payment methods
+            </Text>
+            <Text
               style={[
-                styles.radioOuter,
-                selectedPayment === opt.id && styles.radioOuterActive,
+                styles.emptyPaymentText,
+                { textAlign: "center", maxWidth: 210 },
               ]}
             >
-              {selectedPayment === opt.id && <View style={styles.radioInner} />}
-            </View>
-          </TouchableOpacity>
-        ))}
+              Add a Mobile Money or card to complete your purchase.
+            </Text>
+            <TouchableOpacity
+              style={{
+                backgroundColor: Colors.navy,
+                borderRadius: 12,
+                paddingVertical: 13,
+                paddingHorizontal: 0,
+                width: "100%",
+                alignItems: "center",
+                marginTop: 4,
+              }}
+              onPress={() =>
+                navigation.navigate("DeliveryFlow", {
+                  screen: "AddMobileMoney",
+                })
+              }
+            >
+              <Text
+                style={{
+                  fontFamily: "Poppins-SemiBold",
+                  fontSize: 14,
+                  color: Colors.primary,
+                }}
+              >
+                + Add Mobile Money
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                borderWidth: 1.5,
+                borderColor: Colors.border,
+                borderRadius: 12,
+                paddingVertical: 12,
+                width: "100%",
+                alignItems: "center",
+              }}
+              onPress={() =>
+                navigation.navigate("DeliveryFlow", { screen: "AddCard" })
+              }
+            >
+              <Text
+                style={{
+                  fontFamily: "Poppins-SemiBold",
+                  fontSize: 14,
+                  color: Colors.textPrimary,
+                }}
+              >
+                + Add Card
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          paymentOptions.map((option: any) => (
+            <TouchableOpacity
+              key={option.id}
+              style={[
+                styles.paymentRow,
+                selectedPaymentId === option.id && styles.paymentRowActive,
+              ]}
+              onPress={() => setSelectedPaymentId(option.id)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.paymentIcon}>
+                {option.type === "momo" ? (
+                  <Image
+                    source={require("../../assets/images/mtn_logo.png")}
+                    style={{ width: 32, height: 32 }}
+                    resizeMode="contain"
+                  />
+                ) : option.type === "card" ? (
+                  <Image
+                    source={require("../../assets/images/visa_logo.png")}
+                    style={{ width: 36, height: 24 }}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <WalletSvg width={28} height={28} />
+                )}
+              </View>
+              <View style={styles.paymentInfo}>
+                <Text style={styles.paymentLabel}>{option.label}</Text>
+                {option.sub ? (
+                  <Text style={styles.paymentSub}>{option.sub}</Text>
+                ) : null}
+              </View>
+              <View
+                style={[
+                  styles.radio,
+                  selectedPaymentId === option.id && styles.radioActive,
+                ]}
+              >
+                {selectedPaymentId === option.id && (
+                  <View style={styles.radioInner} />
+                )}
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
       </Animated.ScrollView>
 
       <View style={styles.footer}>
         <TouchableOpacity
-          style={styles.confirmBtn}
-          onPress={handleConfirm}
+          style={[
+            styles.confirmBtn,
+            (!selectedPaymentId || purchaseMutation.isPending) && {
+              opacity: 0.6,
+            },
+          ]}
+          onPress={handleConfirmPayment}
           activeOpacity={0.85}
+          disabled={!selectedPaymentId || purchaseMutation.isPending}
         >
-          {loading ? (
+          {purchaseMutation.isPending ? (
             <ActivityIndicator color={Colors.textPrimary} />
           ) : (
-            <Text style={styles.confirmBtnText}>
-              Confirm & Pay {plan?.price ?? "GHS 75.00"}
-            </Text>
+            <Text style={styles.confirmBtnText}>Confirm Payment</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -212,102 +316,91 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   headerSpacer: { width: 32 },
-  scroll: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 },
-
+  scroll: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20 },
+  planSummary: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F7F8FA",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+    gap: 12,
+  },
+  planSummaryInfo: { flex: 1 },
+  planSummaryName: {
+    fontFamily: "HelveticaNeue-CondensedBold",
+    fontSize: 16,
+    color: Colors.textPrimary,
+    marginBottom: 3,
+  },
+  planSummaryDetail: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 13,
+    color: Colors.textMuted,
+  },
+  planSummaryPrice: {
+    fontFamily: "HelveticaNeue-CondensedBold",
+    fontSize: 16,
+    color: Colors.navy,
+  },
   sectionTitle: {
     fontFamily: "HelveticaNeue-CondensedBold",
     fontSize: 16,
     color: Colors.navy,
     marginBottom: 14,
-    letterSpacing: 0.1,
   },
-
-  // Summary — flat, border only
-  summaryCard: {
-    // borderWidth: 1,
-    // borderColor: Colors.border,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    backgroundColor: Colors.white,
-    //   shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    // shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
-  },
-  summaryRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 14,
-  },
-  summaryRowBorder: { borderTopWidth: 1, borderTopColor: Colors.border },
-  summaryLabel: {
-    fontFamily: "Poppins-Regular",
-    fontSize: 14,
-    color: Colors.textMuted,
-  },
-  summaryValue: {
-    fontFamily: "Poppins-SemiBold",
-    fontSize: 14,
-    color: Colors.textPrimary,
-  },
-  summaryTotal: {
-    fontFamily: "HelveticaNeue-CondensedBold",
-    fontSize: 17,
-    color: Colors.navy,
-    letterSpacing: 0.2,
-  },
-
-  // Payment rows — flat
   paymentRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    gap: 14,
+    borderRadius: 14,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    borderRadius: 16,
-    marginBottom: 10,
-    backgroundColor: Colors.white,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+    gap: 14,
   },
-  paymentRowBorder: {},
-  paymentRowActive: { borderColor: Colors.navy, borderWidth: 2 },
-  paymentIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: "#F2F4F7",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  paymentRowActive: { borderColor: Colors.navy, backgroundColor: "#F7F8FA" },
+  paymentIcon: { width: 40, alignItems: "center" },
   paymentInfo: { flex: 1 },
   paymentLabel: {
     fontFamily: "Poppins-SemiBold",
     fontSize: 14,
     color: Colors.textPrimary,
-    marginBottom: 2,
   },
   paymentSub: {
     fontFamily: "Poppins-Regular",
     fontSize: 12,
     color: Colors.textMuted,
+    marginTop: 2,
   },
-  radioOuter: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
     borderColor: Colors.border,
     alignItems: "center",
     justifyContent: "center",
   },
-  radioOuterActive: { borderColor: Colors.navy, backgroundColor: Colors.navy },
+  radioActive: { borderColor: Colors.navy },
   radioInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.white,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.navy,
   },
-
+  emptyPayment: { alignItems: "center", paddingVertical: 24, gap: 12 },
+  emptyPaymentText: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 14,
+    color: Colors.textMuted,
+  },
+  addPaymentLink: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.navy,
+  },
   footer: {
     paddingHorizontal: 20,
     paddingBottom: Platform.OS === "ios" ? 36 : 24,
@@ -325,10 +418,5 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: Colors.textPrimary,
     letterSpacing: 0.3,
-  },
-  paymentLogo: {
-    width: 48,
-    height: 30,
-    borderRadius: 4,
   },
 });

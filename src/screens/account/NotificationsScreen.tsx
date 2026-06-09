@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     color: Colors.textMuted, marginBottom: 20, lineHeight: 20,
   },
   sectionTitle: {
-    fontFamily: 'HelveticaNeue-CondensedBold', fontSize: 15,
+    fontFamily: 'Poppins-Bold', fontSize: 15,
     color: Colors.navy, marginBottom: 10, letterSpacing: 0.1,
   },
   card: { borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
