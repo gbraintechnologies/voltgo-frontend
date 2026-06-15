@@ -23,11 +23,11 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
   const isAuthenticated = useAuthStore((s: any) => s.isAuthenticated);
+  const hasSeenOnboarding = useAuthStore((s: any) => s.hasSeenOnboarding);
 
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName={isAuthenticated ? "MainTabs" : "Splash"}
         screenOptions={{
           headerShown: false,
           gestureEnabled: true,
@@ -36,19 +36,26 @@ export default function RootNavigator() {
         }}
       >
         {!isAuthenticated ? (
-          // ── Auth screens ──
           <>
-            <Stack.Screen
-              name="Splash"
-              component={SplashScreen}
-              options={{ animation: "none" }}
-            />
-            <Stack.Screen
-              name="Onboarding"
-              component={OnboardingScreen}
-              options={{ animation: "fade" }}
-            />
+            {/* ✅ PhoneAuth is always FIRST — so it's the default after logout */}
             <Stack.Screen name="PhoneAuth" component={PhoneAuthScreen} />
+
+            {/* Onboarding screens only registered if not yet seen */}
+            {!hasSeenOnboarding && (
+              <>
+                <Stack.Screen
+                  name="Splash"
+                  component={SplashScreen}
+                  options={{ animation: "none" }}
+                />
+                <Stack.Screen
+                  name="Onboarding"
+                  component={OnboardingScreen}
+                  options={{ animation: "fade" }}
+                />
+              </>
+            )}
+
             <Stack.Screen
               name="OTPVerification"
               component={OTPVerificationScreen}
@@ -72,7 +79,6 @@ export default function RootNavigator() {
             />
           </>
         ) : (
-          // ── Authenticated screens ──
           <>
             <Stack.Screen
               name="MainTabs"
@@ -103,3 +109,6 @@ export default function RootNavigator() {
     </NavigationContainer>
   );
 }
+
+
+

@@ -25,6 +25,8 @@ import { useAuthStore } from "../../stores/authStore";
 import { ApiError } from "../../api/client";
 import { useToast } from "../../components/common/Toast";
 import ConfirmModal from "../../components/common/ConfirmModal";
+import { useBiometrics } from "../../hooks/useBiometrics";
+import { biometricStorage } from "../../utils/biometrics";
 
 const { width, height } = Dimensions.get("window");
 const HERO_HEIGHT = height * 0.34;
@@ -40,7 +42,8 @@ const googleSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
 </svg>`;
 
-type AuthMode = "phone" | "login" | "register";
+// Simplified: just "login" or "register" — no intermediate "phone" step
+type AuthMode = "login" | "register";
 
 export default function PhoneAuthScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -49,17 +52,26 @@ export default function PhoneAuthScreen({ navigation }: Props) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [mode, setMode] = useState<AuthMode>("phone");
+  const [mode, setMode] = useState<AuthMode>("login");
   const [showPassword, setShowPassword] = useState(false);
 
-  // Modal state for "account already exists" prompt
   const [accountExistsModal, setAccountExistsModal] = useState(false);
+  const { biometricType, isEnabled, isReady, label, prompt } = useBiometrics();
+  const [hasStoredCreds, setHasStoredCreds] = useState(false);
 
   const slideUp = useRef(new Animated.Value(30)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
+  // Animated underline position for the tab switcher
+  const tabIndicator = useRef(new Animated.Value(0)).current;
 
   const registerMutation = useRegister();
   const loginMutation = useLogin();
+
+  useEffect(() => {
+    biometricStorage.getCredentials().then((creds) => {
+      setHasStoredCreds(!!creds);
+    });
+  }, []);
 
   useEffect(() => {
     Animated.parallel([
@@ -77,30 +89,66 @@ export default function PhoneAuthScreen({ navigation }: Props) {
     ]).start();
   }, []);
 
+  useEffect(() => {
+    if (!isReady || !isEnabled || !hasStoredCreds) return;
+    const t = setTimeout(() => handleBiometricLogin(), 600);
+    return () => clearTimeout(t);
+  }, [isReady, isEnabled, hasStoredCreds]);
+
+  const handleBiometricLogin = async () => {
+    try {
+      const success = await prompt();
+      if (!success) return;
+      const creds = await biometricStorage.getCredentials();
+      if (!creds) return;
+      await loginMutation.mutateAsync({
+        phone: creds.phone,
+        password: creds.password,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const msg =
+        err instanceof ApiError ? err.message : "Biometric login failed.";
+      toast.error(msg);
+    }
+  };
+
+  const switchMode = (next: AuthMode) => {
+    if (next === mode) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Slide indicator: 0 = login (left), 1 = register (right)
+    Animated.spring(tabIndicator, {
+      toValue: next === "login" ? 0 : 1,
+      tension: 70,
+      friction: 10,
+      useNativeDriver: false,
+    }).start();
+    setMode(next);
+    setPassword("");
+    setFullName("");
+  };
+
   const isLoading = registerMutation.isPending || loginMutation.isPending;
 
-  const handleContinuePhone = () => {
+  const handleLogin = async () => {
     const cleaned = phone.replace(/\s/g, "");
     if (cleaned.length < 9) {
-      // Light warning haptic — user made an input error
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       toast.warning("Please enter a valid phone number.");
       return;
     }
-    // Subtle tap feedback on successful step progression
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setMode("login");
-  };
-
-  const handleLogin = async () => {
-    if (!password) return;
-    const cleaned = phone.replace(/\s/g, "");
+    if (!password) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      toast.warning("Please enter your password.");
+      return;
+    }
     try {
       await loginMutation.mutateAsync({ phone: cleaned, password });
-      // Success haptic — auth store update triggers navigation
+      // Save credentials for biometric setup AFTER successful login
+      await biometricStorage.saveCredentials(cleaned, password);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
-      // Error haptic — login failed
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       const msg =
         err instanceof ApiError
@@ -111,8 +159,22 @@ export default function PhoneAuthScreen({ navigation }: Props) {
   };
 
   const handleRegister = async () => {
-    if (!fullName.trim() || !password) return;
     const cleaned = phone.replace(/\s/g, "");
+    if (cleaned.length < 9) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      toast.warning("Please enter a valid phone number.");
+      return;
+    }
+    if (!fullName.trim()) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      toast.warning("Please enter your full name.");
+      return;
+    }
+    if (!password) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      toast.warning("Please enter a password.");
+      return;
+    }
     try {
       await registerMutation.mutateAsync({
         fullName: fullName.trim(),
@@ -132,6 +194,13 @@ export default function PhoneAuthScreen({ navigation }: Props) {
       }
     }
   };
+
+  // Interpolate indicator translateX across tab container width
+  const TAB_WIDTH = (width - 48) / 2; // half of content width
+  const indicatorX = tabIndicator.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, TAB_WIDTH],
+  });
 
   return (
     <>
@@ -164,21 +233,51 @@ export default function PhoneAuthScreen({ navigation }: Props) {
           <Animated.View
             style={{ opacity: fadeIn, transform: [{ translateY: slideUp }] }}
           >
-            <Text style={styles.heading}>
-              {mode === "phone"
-                ? "Enter your number"
-                : mode === "login"
-                  ? "Welcome back"
-                  : "Create account"}
-            </Text>
+            {/* ── Tab switcher ── */}
+            <View style={tabStyles.container}>
+              <Animated.View
+                style={[
+                  tabStyles.indicator,
+                  { transform: [{ translateX: indicatorX }] },
+                ]}
+              />
+              <TouchableOpacity
+                style={tabStyles.tab}
+                onPress={() => switchMode("login")}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={[
+                    tabStyles.tabText,
+                    mode === "login" && tabStyles.tabTextActive,
+                  ]}
+                >
+                  Log in
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={tabStyles.tab}
+                onPress={() => switchMode("register")}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={[
+                    tabStyles.tabText,
+                    mode === "register" && tabStyles.tabTextActive,
+                  ]}
+                >
+                  Register
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.subtitle}>
-              {mode === "phone"
-                ? "We will send you a verification code on this number as SMS."
-                : mode === "login"
-                  ? "Enter your password to continue."
-                  : "Fill in your details to get started."}
+              {mode === "login"
+                ? "Welcome back! Enter your details to continue."
+                : "Create your account to get started."}
             </Text>
 
+            {/* Full name — register only */}
             {mode === "register" && (
               <View style={[styles.inputRow, { marginBottom: 12 }]}>
                 <TextInput
@@ -192,6 +291,7 @@ export default function PhoneAuthScreen({ navigation }: Props) {
               </View>
             )}
 
+            {/* Phone number */}
             <View style={styles.inputRow}>
               <TouchableOpacity style={styles.countryPicker}>
                 <Text style={styles.flagEmoji}>🇬🇭</Text>
@@ -204,63 +304,43 @@ export default function PhoneAuthScreen({ navigation }: Props) {
                 keyboardType="phone-pad"
                 value={phone}
                 onChangeText={setPhone}
-                editable={mode === "phone"}
               />
-              {mode !== "phone" && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setMode("phone");
-                    setPassword("");
-                  }}
-                  style={{ paddingHorizontal: 12 }}
-                >
-                  <Text
-                    style={{
-                      color: "#888",
-                      fontSize: 13,
-                      fontFamily: "Poppins-Regular",
-                    }}
-                  >
-                    Edit
-                  </Text>
-                </TouchableOpacity>
-              )}
             </View>
 
-            {(mode === "login" || mode === "register") && (
-              <View style={[styles.inputRow, { marginTop: 0 }]}>
-                <TextInput
-                  style={[styles.phoneInput, { flex: 1 }]}
-                  placeholder="Password"
-                  placeholderTextColor="#AAAAAA"
-                  secureTextEntry={!showPassword}
-                  value={password}
-                  onChangeText={setPassword}
+            {/* Password */}
+            <View style={[styles.inputRow, { marginTop: 0 }]}>
+              <TextInput
+                style={[styles.phoneInput, { flex: 1 }]}
+                placeholder="Password"
+                placeholderTextColor="#AAAAAA"
+                secureTextEntry={!showPassword}
+                value={password}
+                onChangeText={setPassword}
+              />
+              <TouchableOpacity
+                onPress={() => setShowPassword((prev) => !prev)}
+                style={{ paddingHorizontal: 14 }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Image
+                  source={
+                    showPassword
+                      ? require("../../../assets/icons/eye-open.png")
+                      : require("../../../assets/icons/eye-closed.png")
+                  }
+                  style={{ width: 22, height: 22, tintColor: "#888" }}
+                  resizeMode="contain"
                 />
-                <TouchableOpacity
-                  onPress={() => setShowPassword((prev) => !prev)}
-                  style={{ paddingHorizontal: 14 }}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Image
-                    source={
-                      showPassword
-                        ? require("../../../assets/icons/eye-open.png")
-                        : require("../../../assets/icons/eye-closed.png")
-                    }
-                    style={{ width: 22, height: 22, tintColor: "#888" }}
-                    resizeMode="contain"
-                  />
-                </TouchableOpacity>
-              </View>
-            )}
+              </TouchableOpacity>
+            </View>
 
+            {/* Forgot password — login only */}
             {mode === "login" && (
               <TouchableOpacity
                 onPress={() => navigation.navigate("ForgotPassword")}
                 style={{
                   alignSelf: "flex-end",
-                  marginBottom: 8,
+                  marginBottom: 20,
                   marginTop: -4,
                 }}
               >
@@ -276,34 +356,24 @@ export default function PhoneAuthScreen({ navigation }: Props) {
               </TouchableOpacity>
             )}
 
-            {mode !== "phone" && (
-              <TouchableOpacity
-                onPress={() => setMode(mode === "login" ? "register" : "login")}
-                style={{ alignItems: "center", marginBottom: 8 }}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Poppins-Regular",
-                    fontSize: 13,
-                    color: "#555",
-                  }}
-                >
-                  {mode === "login"
-                    ? "Don't have an account? "
-                    : "Already have an account? "}
-                  <Text
-                    style={{
-                      color: Colors.primary,
-                      fontFamily: "Poppins-SemiBold",
-                    }}
-                  >
-                    {mode === "login" ? "Register" : "Log in"}
-                  </Text>
+              {/* CTA button */}
+            <TouchableOpacity
+              style={[styles.button, isLoading && { opacity: 0.7 }]}
+              activeOpacity={0.82}
+              onPress={mode === "login" ? handleLogin : handleRegister}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#0F1F3D" />
+              ) : (
+                <Text style={styles.buttonText}>
+                  {mode === "login" ? "Log in" : "Register"}
                 </Text>
-              </TouchableOpacity>
-            )}
+              )}
+            </TouchableOpacity>
 
-            {mode === "phone" && (
+            {/* Social buttons — login only */}
+            {mode === "login" && (
               <>
                 <View style={styles.dividerRow}>
                   <View style={styles.dividerLine} />
@@ -315,47 +385,31 @@ export default function PhoneAuthScreen({ navigation }: Props) {
                   label="Sign in with Google"
                   onPress={() => {}}
                 />
-                <TouchableOpacity
-                  style={socialStyles.button}
-                  activeOpacity={0.75}
-                  onPress={() => {}}
-                >
-                  <View style={socialStyles.iconWrap}>
-                    <Image
-                      source={require("../../../assets/icons/fingerprint.png")}
-                      style={{ width: 22, height: 22 }}
-                      resizeMode="contain"
-                    />
-                  </View>
-                  <Text style={socialStyles.label}>Biometric Sign in</Text>
-                </TouchableOpacity>
+                {mode === "login" &&
+                  isReady &&
+                  isEnabled &&
+                  biometricType &&
+                  hasStoredCreds && (
+                    <TouchableOpacity
+                      style={socialStyles.button}
+                      activeOpacity={0.75}
+                      onPress={handleBiometricLogin}
+                      disabled={loginMutation.isPending}
+                    >
+                      <View style={socialStyles.iconWrap}>
+                        <Image
+                          source={require("../../../assets/icons/fingerprint.png")}
+                          style={{ width: 22, height: 22 }}
+                          resizeMode="contain"
+                        />
+                      </View>
+                      <Text style={socialStyles.label}>{label} Sign in</Text>
+                    </TouchableOpacity>
+                  )}
               </>
             )}
 
-            <TouchableOpacity
-              style={[styles.button, isLoading && { opacity: 0.7 }]}
-              activeOpacity={0.82}
-              onPress={
-                mode === "phone"
-                  ? handleContinuePhone
-                  : mode === "login"
-                    ? handleLogin
-                    : handleRegister
-              }
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#0F1F3D" />
-              ) : (
-                <Text style={styles.buttonText}>
-                  {mode === "phone"
-                    ? "Continue"
-                    : mode === "login"
-                      ? "Log in"
-                      : "Register"}
-                </Text>
-              )}
-            </TouchableOpacity>
+          
 
             <Text style={styles.terms}>
               By continuing, you agree to our{" "}
@@ -378,7 +432,7 @@ export default function PhoneAuthScreen({ navigation }: Props) {
         variant="primary"
         onConfirm={() => {
           setAccountExistsModal(false);
-          setMode("login");
+          switchMode("login");
         }}
         onCancel={() => setAccountExistsModal(false)}
       />
@@ -408,6 +462,48 @@ function SocialButton({
     </TouchableOpacity>
   );
 }
+
+const tabStyles = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    backgroundColor: "#F2F2F2",
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 20,
+    position: "relative",
+    overflow: "hidden",
+  },
+  indicator: {
+    position: "absolute",
+    top: 4,
+    left: 4,
+    // width is half the tab container minus padding on both sides
+    width: "50%",
+    bottom: 4,
+    backgroundColor: Colors.white,
+    borderRadius: 11,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 11,
+    alignItems: "center",
+    zIndex: 1,
+  },
+  tabText: {
+    fontFamily: "Poppins-Medium",
+    fontSize: 14,
+    color: "#888888",
+  },
+  tabTextActive: {
+    color: "#0F1F3D",
+    fontFamily: "Poppins-SemiBold",
+  },
+});
 
 const socialStyles = StyleSheet.create({
   button: {
@@ -451,14 +547,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   contentSection: { paddingHorizontal: 24, paddingTop: 28 },
-  heading: {
-    fontFamily: "HelveticaNeue-CondensedBold",
-    fontSize: 26,
-    color: "#0F1F3D",
-    textAlign: "center",
-    marginBottom: 8,
-    letterSpacing: -0.3,
-  },
   subtitle: {
     fontFamily: "Poppins-Regular",
     fontSize: 14,
@@ -506,8 +594,8 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     paddingVertical: 17,
     alignItems: "center",
-    marginTop: 8,
-    marginBottom: 14,
+    marginTop: 10,
+    marginBottom: 16,
   },
   buttonText: {
     fontFamily: "Poppins-SemiBold",

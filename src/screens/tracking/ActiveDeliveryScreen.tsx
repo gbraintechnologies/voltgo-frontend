@@ -19,6 +19,7 @@ import {
   Animated,
   PanResponder,
   ScrollView,
+  Alert,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -31,6 +32,11 @@ import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
 import ChevronRightSvg from "../../assets/icons/chevron_right.svg";
 import { useRoutePolyline } from "../../utils/useRoutePolyline";
 import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
+import { useCancelOrder } from "@/hooks/useApi";
+import { useOrderSocket } from "@/hooks/useOrderSocket";
+import BicycleSvg from "../../assets/icons/bicycle.svg"; // already used in RiderFoundScreen
+import MotorcycleSvg from "../../assets/icons/emoto.svg";
+import CancelReasonModal from "../activities/CancelReasonModal";
 
 const { width, height: SCREEN_H } = Dimensions.get("window");
 
@@ -52,9 +58,6 @@ const SNAP_CARD = SCREEN_H * 0.72;
 const SNAP_DETAIL = SCREEN_H * 0.2;
 const SNAP_THRESHOLD = 60;
 const VELOCITY_THRESHOLD = 0.4;
-
-// Simulated delivery progress (45% of the way) — replace with real backend data
-const DELIVERY_PROGRESS = 0.45;
 
 type RouteParams = RouteProp<DeliveryStackParamList, "ActiveDelivery">;
 
@@ -79,10 +82,37 @@ function interpolateOnRoute(
   };
 }
 
+function computeProgress(
+  riderCoord: { latitude: number; longitude: number },
+  routeCoords: { latitude: number; longitude: number }[],
+): number {
+  if (routeCoords.length < 2) return 0;
+  let minDist = Infinity;
+  let closestIdx = 0;
+  for (let i = 0; i < routeCoords.length; i++) {
+    const d =
+      Math.abs(routeCoords[i].latitude - riderCoord.latitude) +
+      Math.abs(routeCoords[i].longitude - riderCoord.longitude);
+    if (d < minDist) {
+      minDist = d;
+      closestIdx = i;
+    }
+  }
+  return closestIdx / (routeCoords.length - 1);
+}
+
 export default function ActiveDeliveryScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
   const mapRef = useRef<MapView>(null);
+
+  const cancelMutation = useCancelOrder();
+  const orderId = (route.params as any)?.orderId as string | undefined;
+
+  const [liveRiderCoord, setLiveRiderCoord] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
   const {
     riderName = "John Cena",
@@ -102,6 +132,10 @@ export default function ActiveDeliveryScreen() {
 
   const vehicleType = (route.params as any)?.vehicleType ?? "bicycle";
 
+  const [deliveryProgress, setDeliveryProgress] = useState(0);
+
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
+
   const { coords: routeCoords, etaMinutes } = useRoutePolyline({
     origin: pickupCoord,
     destination: dropoffCoord,
@@ -109,16 +143,35 @@ export default function ActiveDeliveryScreen() {
   });
 
   // Rider position based on progress
-  const [riderCoord, setRiderCoord] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
+  // const [riderCoord, setRiderCoord] = useState<{
+  //   latitude: number;
+  //   longitude: number;
+  // } | null>(null);
 
-  useEffect(() => {
-    if (routeCoords.length === 0) return;
-    const pos = interpolateOnRoute(routeCoords, DELIVERY_PROGRESS);
-    if (pos) setRiderCoord(pos);
-  }, [routeCoords]);
+  const riderCoord =
+    liveRiderCoord ?? interpolateOnRoute(routeCoords, deliveryProgress);
+
+  useOrderSocket({
+    orderId: orderId ?? "",
+    onRiderLocation: (payload) => {
+      const coord = { latitude: payload.lat, longitude: payload.lng };
+      setLiveRiderCoord(coord);
+      // ✅ compute real progress from live location
+      if (routeCoords.length > 1) {
+        setDeliveryProgress(computeProgress(coord, routeCoords));
+      }
+    },
+    onStatusChanged: (payload) => {
+      if (payload.status === "delivered") {
+        navigation.navigate("DeliveryComplete", {
+          riderName: route.params?.riderName ?? "Your Rider",
+          riderRating: route.params?.riderRating ?? 5,
+          itemType: route.params?.itemType ?? "Parcel",
+          isScheduled: false,
+        });
+      }
+    },
+  });
 
   // Fit map to show route with room for the card
   useEffect(() => {
@@ -170,8 +223,10 @@ export default function ActiveDeliveryScreen() {
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, { dy }) => Math.abs(dy) > 5,
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, { dx, dy }) => {
+        return Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 4;
+      },
       onPanResponderGrant: () => {
         translateY.stopAnimation((val) => {
           lastY.current = val;
@@ -199,6 +254,10 @@ export default function ActiveDeliveryScreen() {
               ? SNAP_CARD
               : SNAP_DETAIL,
           );
+      },
+      onPanResponderTerminate: () => {
+        translateY.flattenOffset();
+        springTo(lastY.current);
       },
     }),
   ).current;
@@ -269,15 +328,19 @@ export default function ActiveDeliveryScreen() {
         </Marker>
 
         {/* Rider — positioned at DELIVERY_PROGRESS along route */}
-        {riderCoord && (
+        {(liveRiderCoord ?? riderCoord) && (
           <Marker
-            coordinate={riderCoord}
+            coordinate={liveRiderCoord ?? riderCoord!}
             anchor={{ x: 0.5, y: 0.5 }}
             tracksViewChanges={false}
           >
             <View style={styles.riderMarker}>
               <Text style={{ fontSize: 20 }}>
-                {vehicleType === "e-motorcycle" ? "🛵" : "🚲"}
+                {vehicleType === "e-motorcycle" ? (
+                  <MotorcycleSvg width={22} height={22} />
+                ) : (
+                  <BicycleSvg width={22} height={22} />
+                )}
               </Text>
             </View>
           </Marker>
@@ -294,8 +357,12 @@ export default function ActiveDeliveryScreen() {
       </TouchableOpacity>
 
       {/* Bottom Sheet */}
-      <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
-        <View {...panResponder.panHandlers} style={styles.handleArea}>
+      <Animated.View
+        style={[styles.sheet, { transform: [{ translateY }] }]}
+        {...panResponder.panHandlers}
+      >
+        {/* Handle — decorative only */}
+        <View style={styles.handleArea}>
           <View style={styles.handleBar} />
         </View>
 
@@ -358,7 +425,7 @@ export default function ActiveDeliveryScreen() {
                 <View
                   style={[
                     styles.progressFill,
-                    { width: `${DELIVERY_PROGRESS * 100}%` },
+                    { width: `${deliveryProgress * 100}%` },
                   ]}
                 />
               </View>
@@ -422,15 +489,34 @@ export default function ActiveDeliveryScreen() {
             <View style={{ height: 24 }} />
             <TouchableOpacity
               style={styles.cancelBtn}
-              onPress={() => navigation.navigate("HomeMap")}
+              onPress={() => setCancelModalVisible(true)} // ✅ open modal first
               activeOpacity={0.78}
             >
               <Text style={styles.cancelText}>Cancel Delivery</Text>
             </TouchableOpacity>
+
             <View style={{ height: 40 }} />
           </Animated.View>
         </ScrollView>
       </Animated.View>
+
+      <CancelReasonModal
+        visible={cancelModalVisible}
+        order={
+          orderId ? ({ id: orderId, dropoff_address: dropoff } as any) : null
+        }
+        loading={cancelMutation.isPending}
+        onClose={() => setCancelModalVisible(false)}
+        onConfirm={async (reason) => {
+          if (orderId) {
+            try {
+              await cancelMutation.mutateAsync({ id: orderId, reason });
+            } catch (_) {}
+          }
+          setCancelModalVisible(false);
+          navigation.getParent()?.navigate("MainTabs", { screen: "HomeMap" });
+        }}
+      />
     </View>
   );
 }

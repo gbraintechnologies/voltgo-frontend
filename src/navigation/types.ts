@@ -57,23 +57,34 @@ export type DeliveryStackParamList = {
     senderName?: string;
     pickup: string;
     dropoff: string;
+    pickupCoords?: { latitude: number; longitude: number }; // ← add
+    dropoffCoords?: { latitude: number; longitude: number }; // ← add
     itemType: string;
     weight: "lightweight" | "standard" | "heavy";
     specialInstructions?: string;
     vehicleType: "bicycle" | "e-motorcycle";
     price: number;
+    paymentMethod?: string;
     scheduledTime?: string;
     scheduledDate?: string;
-    paymentMethod?: string;
     isScheduled?: boolean;
+    selectedPaymentMethod?: {
+      id: string;
+      label: string;
+      method: string;
+    };
   };
   PayWith: {
     vehicleType: "bicycle" | "e-motorcycle";
     price: number;
     pickup: string;
     dropoff: string;
+    pickupCoords?: { latitude: number; longitude: number };
+    dropoffCoords?: { latitude: number; longitude: number };
+    returnTo?: string;
   };
   AddPaymentMethod: undefined;
+  TermsCondition: undefined;
   // Tracking
   RiderMatching: {
     pickup?: string;
@@ -88,6 +99,7 @@ export type DeliveryStackParamList = {
     dropoffCoords?: { latitude: number; longitude: number };
   };
   RiderFound: {
+    orderId?: string;
     riderName?: string;
     riderPlate?: string;
     riderRating?: number;
@@ -100,14 +112,18 @@ export type DeliveryStackParamList = {
     dropoff?: string;
   };
   RiderArriving: {
+    orderId?: string;
     riderName?: string;
     riderPlate?: string;
     riderRating?: number;
     vehicleType?: "bicycle" | "e-motorcycle";
     pickup?: string;
     dropoff?: string;
+    pickupCoords?: { latitude: number; longitude: number }; // ← add
+    dropoffCoords?: { latitude: number; longitude: number }; // ← add
   };
   ActiveDelivery: {
+    orderId?: string;
     riderName?: string;
     riderRating?: number;
     vehicleType?: "bicycle" | "e-motorcycle";
@@ -127,6 +143,7 @@ export type DeliveryStackParamList = {
     itemType?: string;
     isScheduled?: boolean;
     scheduledTime?: string;
+    scheduledDate?: string; 
   };
   AddMobileMoney: undefined;
   AddCard: undefined;
@@ -143,3 +160,5 @@ export type BundlesStackParamList = {
   BundleSuccess: undefined;
   BundleHistory: undefined;
 };
+
+

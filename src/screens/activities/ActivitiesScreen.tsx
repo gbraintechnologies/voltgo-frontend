@@ -10,19 +10,19 @@ import {
   Image,
   Platform,
   ActivityIndicator,
-  Alert,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import FilterIconSvg from "../../assets/icons/filter_icon.svg";
+import FilterIconWhiteSvg from "../../assets/icons/filter_icon_white.svg";
 import RepeatIconSvg from "../../assets/icons/repeat_icon.svg";
 import PinLocationSvg from "../../assets/icons/pin_location.svg";
-import FilterIconWhiteSvg from "../../assets/icons/filter_icon_white.svg";
+import BundleCreditsSvg from "../../assets/icons/bundle_credits.svg";
 import FilterBottomSheet, { FilterState } from "./FilterBottomSheet";
 import { useMyOrders, useCancelOrder } from "../../hooks/useApi";
 import { Order } from "../../api/orders";
 import { useToast } from "@/components/common/Toast";
-import ConfirmModal from "@/components/common/ConfirmModal";
 import * as Haptics from "expo-haptics";
+import CancelReasonModal from "./CancelReasonModal";
 
 const Colors = {
   white: "#FFFFFF",
@@ -36,25 +36,26 @@ const Colors = {
   cancelRed: "#EF4444",
 };
 
-// Status label + colour map
-const STATUS_STYLE: Record<
-  string,
-  { label: string; color: string; bg: string }
-> = {
-  pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7" },
-  searching: { label: "Finding rider", color: "#1D4ED8", bg: "#DBEAFE" },
-  assigned: { label: "Assigned", color: "#065F46", bg: "#D1FAE5" },
-  rider_arriving: { label: "Rider arriving", color: "#065F46", bg: "#D1FAE5" },
-  collected: { label: "Collected", color: "#1D4ED8", bg: "#DBEAFE" },
-  in_transit: { label: "In transit", color: "#1D4ED8", bg: "#DBEAFE" },
-  delivered: { label: "Delivered", color: "#065F46", bg: "#D1FAE5" },
-  cancelled: { label: "Cancelled", color: "#991B1B", bg: "#FEE2E2" },
-  failed: { label: "Failed", color: "#991B1B", bg: "#FEE2E2" },
-};
-
 function formatDate(iso: string) {
   const d = new Date(iso);
-  return `${d.getDate()} ${d.toLocaleString("en", { month: "short" })} · ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+  return `${d.getDate()} ${d.toLocaleString("en", { month: "short" })} · ${d
+    .getHours()
+    .toString()
+    .padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+}
+
+function formatScheduledTime(iso: string) {
+  const d = new Date(iso);
+  const day = d.toLocaleString("en", { weekday: "long" });
+  const date = d.getDate();
+  const month = d.toLocaleString("en", { month: "long" });
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  const endH = (d.getHours() + 1).toString().padStart(2, "0");
+  return {
+    time: `${hh}:${mm} - ${endH}:${mm}`,
+    date: `${day}, ${date} ${month}`,
+  };
 }
 
 function groupByMonth(orders: Order[]) {
@@ -68,9 +69,285 @@ function groupByMonth(orders: Order[]) {
   return map;
 }
 
+// Status label map for the live badge on Active cards
+const STATUS_STYLE: Record<
+  string,
+  { label: string; color: string; bg: string }
+> = {
+  pending: { label: "Finding rider", color: "#1D4ED8", bg: "#DBEAFE" },
+  searching: { label: "Finding rider", color: "#1D4ED8", bg: "#DBEAFE" },
+  assigned: { label: "Rider assigned", color: "#065F46", bg: "#D1FAE5" },
+  rider_arriving: { label: "Rider arriving", color: "#065F46", bg: "#D1FAE5" },
+  collected: { label: "Collected", color: "#1D4ED8", bg: "#DBEAFE" },
+  in_transit: { label: "In transit", color: "#1D4ED8", bg: "#DBEAFE" },
+};
+
+// ── Section label exactly like ReviewDelivery ──────────────────────────────
+function SectionLabel({ label }: { label: string }) {
+  return (
+    <View style={sectionStyles.wrap}>
+      <Text style={sectionStyles.text}>{label}</Text>
+      <View style={sectionStyles.line} />
+    </View>
+  );
+}
+
+function DashedLine() {
+  return (
+    <View
+      style={{ height: 44, justifyContent: "center", alignItems: "center" }}
+    >
+      {Array.from({ length: 6 }).map((_, i) => (
+        <View
+          key={i}
+          style={{
+            width: 1.5,
+            height: 5,
+            backgroundColor: "#C8D0DC",
+            marginVertical: 2,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+// ── Pulsing live dot ─────────────────────────────────────────────────────
+function LivePulseDot({ color }: { color: string }) {
+  const pulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1.8,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  return (
+    <View
+      style={{
+        width: 8,
+        height: 8,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Animated.View
+        style={{
+          position: "absolute",
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: color,
+          opacity: 0.35,
+          transform: [{ scale: pulse }],
+        }}
+      />
+      <View
+        style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }}
+      />
+    </View>
+  );
+}
+
+// ── Shared delivery card — used for both Upcoming and Active ──────────────
+function DeliveryCard({
+  item,
+  variant,
+  onCancel,
+  onTrack,
+  cancelling,
+}: {
+  item: Order;
+  variant: "upcoming" | "active";
+  onCancel?: () => void;
+  onTrack?: () => void;
+  cancelling?: boolean;
+}) {
+  const scheduled = item.scheduled_at
+    ? formatScheduledTime(item.scheduled_at)
+    : null;
+  const status = STATUS_STYLE[item.status] ?? STATUS_STYLE.pending;
+
+  // Glow animation for the whole card border when active
+  const glow = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (variant !== "active") return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, {
+          toValue: 1,
+          duration: 1200,
+          useNativeDriver: false,
+        }),
+        Animated.timing(glow, {
+          toValue: 0,
+          duration: 1200,
+          useNativeDriver: false,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [variant]);
+
+  const borderColor = glow.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["#E8EEF4", status.color],
+  });
+
+  const CardWrapper = variant === "active" ? Animated.View : View;
+
+  return (
+    <CardWrapper
+      style={[
+        upcomingStyles.card,
+        variant === "active" && {
+          borderWidth: 1.5,
+          borderColor: borderColor as any,
+          borderRadius: 16,
+          paddingHorizontal: 12,
+        },
+      ]}
+    >
+      {/* Live status badge for active deliveries */}
+      {variant === "active" && (
+        <View style={upcomingStyles.liveBadgeRow}>
+          <View
+            style={[upcomingStyles.liveBadge, { backgroundColor: status.bg }]}
+          >
+            <LivePulseDot color={status.color} />
+            <Text
+              style={[upcomingStyles.liveBadgeText, { color: status.color }]}
+            >
+              {status.label}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Route */}
+      <SectionLabel label="Route" />
+
+      <View style={{ flexDirection: "row", gap: 14 }}>
+        {/* Left icon column: box → dashed line → pin */}
+        <View style={{ width: 40, alignItems: "center" }}>
+          <Image
+            source={require("../../assets/images/parcel_box.png")}
+            style={upcomingStyles.routeIconImg}
+            resizeMode="contain"
+          />
+          <DashedLine />
+          <PinLocationSvg width={20} height={24} />
+        </View>
+
+        {/* Right text column */}
+        <View style={{ flex: 1, justifyContent: "space-between" }}>
+          {/* Pickup — aligned with box icon */}
+          <View style={{ paddingTop: 2, height: 40 }}>
+            <Text style={upcomingStyles.routePrimary}>
+              {item.item_description ?? "Package"}
+            </Text>
+            <Text style={upcomingStyles.routeSecondary} numberOfLines={1}>
+              {item.pickup_address}
+            </Text>
+          </View>
+
+          {/* Spacer matches DashedLine height */}
+          <View style={{ height: 44 }} />
+
+          {/* Dropoff — aligned with pin icon */}
+          <View style={{ paddingBottom: 2 }}>
+            <Text style={upcomingStyles.routePrimary}>Recipient</Text>
+            <Text style={upcomingStyles.routeSecondary} numberOfLines={1}>
+              {item.dropoff_address}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Pick-up time — only for scheduled (upcoming) deliveries */}
+      {variant === "upcoming" && scheduled && (
+        <>
+          <View style={{ height: 20 }} />
+          <SectionLabel label="Pick - up time" />
+          <View style={upcomingStyles.pickupRow}>
+            <Image
+              source={require("../../assets/images/bicycle_vehicle.png")}
+              style={upcomingStyles.vehicleImg}
+              resizeMode="contain"
+            />
+            <View>
+              <Text style={upcomingStyles.pickupLabel}>
+                Scheduled pick - up
+              </Text>
+              <Text style={upcomingStyles.pickupTime}>{scheduled.time}</Text>
+              <Text style={upcomingStyles.pickupDate}>{scheduled.date}</Text>
+            </View>
+          </View>
+        </>
+      )}
+
+      {/* Payment mode */}
+      <View style={{ height: 20 }} />
+      <SectionLabel label="Payment mode" />
+      <View style={upcomingStyles.paymentRow}>
+        <View style={upcomingStyles.paymentIconWrap}>
+          <BundleCreditsSvg width={50} height={46} />
+        </View>
+        <Text style={upcomingStyles.paymentLabel}>
+          {item.payment_method === "bundle_credit"
+            ? "Bundle Credits"
+            : (item.payment_method ?? "—")}
+        </Text>
+        <Text style={upcomingStyles.paymentPrice}>
+          GHS {Number(item.price_ghs ?? 0).toFixed(2)}
+        </Text>
+      </View>
+
+      {/* Action button */}
+      {variant === "upcoming" && onCancel && (
+        <TouchableOpacity
+          style={[upcomingStyles.cancelBtn, cancelling && { opacity: 0.5 }]}
+          onPress={onCancel}
+          disabled={cancelling}
+          activeOpacity={0.75}
+        >
+          {cancelling ? (
+            <ActivityIndicator size="small" color={Colors.cancelRed} />
+          ) : (
+            <Text style={upcomingStyles.cancelBtnText}>Cancel delivery</Text>
+          )}
+        </TouchableOpacity>
+      )}
+
+      {variant === "active" && onTrack && (
+        <TouchableOpacity
+          style={upcomingStyles.trackBtn}
+          onPress={onTrack}
+          activeOpacity={0.85}
+        >
+          <Text style={upcomingStyles.trackBtnText}>Track delivery</Text>
+        </TouchableOpacity>
+      )}
+    </CardWrapper>
+  );
+}
+
 const PAST_STATUSES = ["delivered", "cancelled", "failed"];
 const ACTIVE_STATUSES = [
-  "pending",
   "searching",
   "assigned",
   "rider_arriving",
@@ -80,9 +357,9 @@ const ACTIVE_STATUSES = [
 
 export default function ActivitiesScreen() {
   const toast = useToast();
+  const route = useRoute<any>();
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const navigation = useNavigation<any>();
-  const [activeTab, setActiveTab] = useState<"past" | "upcoming">("past");
   const fadeIn = useRef(new Animated.Value(0)).current;
   const [filterVisible, setFilterVisible] = useState(false);
   const [filters, setFilters] = useState<FilterState>({
@@ -90,18 +367,46 @@ export default function ActivitiesScreen() {
     vehicles: [],
   });
 
-  const { data: allOrdersRes, isLoading: allLoading } = useMyOrders({
-    limit: 100,
-  });
+  const { data: allOrdersRes, isLoading } = useMyOrders({ limit: 100 });
   const cancelMutation = useCancelOrder();
 
   const allOrders: Order[] =
     (allOrdersRes?.data as any)?.items ?? allOrdersRes?.data?.orders ?? [];
 
   const pastOrders = allOrders.filter((o) => PAST_STATUSES.includes(o.status));
-  const upcomingOrders = allOrders.filter((o) =>
-    ACTIVE_STATUSES.includes(o.status),
+
+  // Upcoming = scheduled deliveries not yet started
+  const upcomingOrders = allOrders.filter(
+    (o) => o.status === "pending" && !!o.scheduled_at,
   );
+
+  // Active = deliveries currently in progress (or pending without a schedule)
+  const activeOrders = allOrders.filter(
+    (o) =>
+      ACTIVE_STATUSES.includes(o.status) ||
+      (o.status === "pending" && !o.scheduled_at),
+  );
+
+  const hasActive = activeOrders.length > 0;
+
+  type Tab = "past" | "upcoming" | "active";
+  const [activeTab, setActiveTab] = useState<Tab>(
+    route.params?.initialTab ?? "past",
+  );
+
+  // If we land on "active" but there's nothing active (e.g. it just finished),
+  // fall back to Past.
+  useEffect(() => {
+    if (activeTab === "active" && !hasActive) {
+      setActiveTab("past");
+    }
+  }, [activeTab, hasActive]);
+
+  useEffect(() => {
+    if (activeOrders.length > 0 && !route.params?.initialTab) {
+      setActiveTab("active");
+    }
+  }, [activeOrders.length]);
 
   const filteredPast = pastOrders.filter((o) => {
     const d = new Date(o.created_at);
@@ -136,20 +441,16 @@ export default function ActivitiesScreen() {
   }, []);
 
   const handleCancelOrder = (order: Order) => {
-    if (!["pending", "searching"].includes(order.status)) {
-      toast.warning("This order can no longer be cancelled.");
-      return;
-    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setCancelTarget(order);
   };
 
-  const confirmCancel = async () => {
+  const confirmCancel = async (reason: string) => {
     if (!cancelTarget) return;
     try {
       await cancelMutation.mutateAsync({
         id: cancelTarget.id,
-        reason: "Cancelled by customer",
+        reason,
       });
       setCancelTarget(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -160,7 +461,28 @@ export default function ActivitiesScreen() {
     }
   };
 
-  const isLoading = allLoading;
+  const handleTrack = (order: Order) => {
+    if (order.status === "rider_arriving") {
+      navigation.navigate("DeliveryFlow", { screen: "RiderArriving" });
+    } else if (["collected", "in_transit"].includes(order.status)) {
+      navigation.navigate("DeliveryFlow", { screen: "ActiveDelivery" });
+    } else {
+      // searching / pending — go back to map where the search/match UI lives
+      navigation.navigate("HomeMap");
+    }
+  };
+
+  const tabs: { key: Tab; label: string }[] = [];
+  if (hasActive) {
+    tabs.push({ key: "active", label: "Active" });
+  }
+  tabs.push(
+    {
+      key: "upcoming",
+      label: `Upcoming${upcomingOrders.length > 0 ? ` (${upcomingOrders.length})` : ""}`,
+    },
+    { key: "past", label: "Past" },
+  );
 
   return (
     <View style={styles.container}>
@@ -172,24 +494,29 @@ export default function ActivitiesScreen() {
 
       <View style={styles.tabRow}>
         <View style={styles.tabs}>
-          {(["past", "upcoming"] as const).map((tab) => (
+          {tabs.map((tab) => (
             <TouchableOpacity
-              key={tab}
+              key={tab.key}
               style={styles.tab}
-              onPress={() => setActiveTab(tab)}
+              onPress={() => setActiveTab(tab.key)}
               activeOpacity={0.75}
             >
-              <Text
-                style={[
-                  styles.tabLabel,
-                  activeTab === tab && styles.tabLabelActive,
-                ]}
-              >
-                {tab === "past"
-                  ? "Past"
-                  : `Active${upcomingOrders.length > 0 ? ` (${upcomingOrders.length})` : ""}`}
-              </Text>
-              {activeTab === tab && <View style={styles.tabUnderline} />}
+              <View style={styles.tabLabelRow}>
+                {tab.key === "active" && (
+                  <View style={{ marginRight: 6 }}>
+                    <LivePulseDot color={Colors.primary} />
+                  </View>
+                )}
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    activeTab === tab.key && styles.tabLabelActive,
+                  ]}
+                >
+                  {tab.label}
+                </Text>
+              </View>
+              {activeTab === tab.key && <View style={styles.tabUnderline} />}
             </TouchableOpacity>
           ))}
         </View>
@@ -207,7 +534,6 @@ export default function ActivitiesScreen() {
             ) : (
               <FilterIconSvg width={20} height={20} />
             )}
-            {hasActiveFilters && <View style={styles.filterBadge} />}
           </TouchableOpacity>
         )}
       </View>
@@ -222,7 +548,6 @@ export default function ActivitiesScreen() {
             <ActivityIndicator size="large" color={Colors.navy} />
           </View>
         ) : activeTab === "past" ? (
-          // ── PAST ORDERS TAB ──────────────────────────────────────────────
           filteredPast.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>No past deliveries yet</Text>
@@ -265,7 +590,7 @@ export default function ActivitiesScreen() {
                         {formatDate(item.created_at)}
                       </Text>
                       <Text style={styles.pastAmount}>
-                        GHS {item.price_ghs.toFixed(2)}
+                        GHS {Number(item.price_ghs ?? 0).toFixed(2)}
                       </Text>
                     </View>
                     <TouchableOpacity
@@ -279,87 +604,50 @@ export default function ActivitiesScreen() {
               </View>
             ))
           )
-        ) : // ── ACTIVE / UPCOMING ORDERS TAB ─────────────────────────────────
-        upcomingOrders.length === 0 ? (
+        ) : activeTab === "upcoming" ? (
+          upcomingOrders.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>No upcoming deliveries</Text>
+            </View>
+          ) : (
+            (() => {
+              const groupedUpcoming = groupByMonth(upcomingOrders);
+              return Object.entries(groupedUpcoming).map(([month, items]) => (
+                <View key={month}>
+                  <View style={styles.monthRow}>
+                    <Text style={styles.monthHeader}>{month}</Text>
+                    <View style={styles.monthLine} />
+                  </View>
+                  {items.map((item) => (
+                    <DeliveryCard
+                      key={item.id}
+                      item={item}
+                      variant="upcoming"
+                      onCancel={() => handleCancelOrder(item)}
+                      cancelling={
+                        cancelMutation.isPending &&
+                        (cancelMutation.variables as any)?.id === item.id
+                      }
+                    />
+                  ))}
+                </View>
+              ));
+            })()
+          )
+        ) : // ── ACTIVE TAB ─────────────────────────────────────────────────
+        activeOrders.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>No active deliveries</Text>
           </View>
         ) : (
-          upcomingOrders.map((item) => {
-            const statusStyle =
-              STATUS_STYLE[item.status] ?? STATUS_STYLE.pending;
-            const canCancel = ["pending", "searching"].includes(item.status);
-
-            return (
-              <View key={item.id} style={styles.activeCard}>
-                {/* Status badge */}
-                <View style={styles.activeCardHeader}>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      { backgroundColor: statusStyle.bg },
-                    ]}
-                  >
-                    <Text
-                      style={[styles.statusText, { color: statusStyle.color }]}
-                    >
-                      {statusStyle.label}
-                    </Text>
-                  </View>
-                  <Text style={styles.activeDate}>
-                    {formatDate(item.created_at)}
-                  </Text>
-                </View>
-
-                {/* Route */}
-                <View style={styles.routeRow}>
-                  <View style={styles.routeDots}>
-                    <View style={styles.dotPickup} />
-                    <View style={styles.routeLine} />
-                    <PinLocationSvg width={14} height={16} />
-                  </View>
-                  <View style={styles.routeAddresses}>
-                    <Text style={styles.routeAddr}>{item.pickup_address}</Text>
-                    <View style={{ height: 12 }} />
-                    <Text style={styles.routeAddr}>{item.dropoff_address}</Text>
-                  </View>
-                </View>
-
-                {/* Footer row */}
-                <View style={styles.activeCardFooter}>
-                  <Text style={styles.activePrice}>
-                    GHS {item.price_ghs.toFixed(2)}
-                  </Text>
-                  <Text style={styles.activeVehicle}>
-                    {item.vehicle_type === "bicycle"
-                      ? "🚲 Bicycle"
-                      : "🛵 Motorcycle"}
-                  </Text>
-                  {canCancel && (
-                    <TouchableOpacity
-                      style={[
-                        styles.cancelBtn,
-                        cancelMutation.isPending && { opacity: 0.5 },
-                      ]}
-                      onPress={() => handleCancelOrder(item)}
-                      disabled={cancelMutation.isPending}
-                      activeOpacity={0.75}
-                    >
-                      {cancelMutation.isPending &&
-                      cancelMutation.variables?.id === item.id ? (
-                        <ActivityIndicator
-                          size="small"
-                          color={Colors.cancelRed}
-                        />
-                      ) : (
-                        <Text style={styles.cancelBtnText}>Cancel</Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            );
-          })
+          activeOrders.map((item) => (
+            <DeliveryCard
+              key={item.id}
+              item={item}
+              variant="active"
+              onTrack={() => handleTrack(item)}
+            />
+          ))
         )}
         <View style={{ height: 32 }} />
       </Animated.ScrollView>
@@ -372,20 +660,163 @@ export default function ActivitiesScreen() {
         availableMonths={availableMonths}
       />
 
-      <ConfirmModal
+      <CancelReasonModal
         visible={!!cancelTarget}
-        title="Cancel delivery"
-        message={`Cancel delivery to ${cancelTarget?.dropoff_address ?? "this address"}?`}
-        confirmLabel="Cancel order"
-        cancelLabel="Keep it"
-        variant="danger"
+        order={cancelTarget}
         loading={cancelMutation.isPending}
         onConfirm={confirmCancel}
-        onCancel={() => setCancelTarget(null)}
+        onClose={() => setCancelTarget(null)}
       />
     </View>
   );
 }
+
+// ── Styles ──────────────────────────────────────────────────────────────────
+
+const sectionStyles = StyleSheet.create({
+  wrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+    gap: 10,
+  },
+  text: {
+    fontFamily: "HelveticaNeue-CondensedBold",
+    fontSize: 15,
+    color: Colors.navy,
+    flexShrink: 0,
+    letterSpacing: 0.1,
+  },
+  line: { flex: 1, height: 1, backgroundColor: Colors.border },
+});
+
+const upcomingStyles = StyleSheet.create({
+  card: {
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 4,
+    marginBottom: 20,
+  },
+  liveBadgeRow: {
+    flexDirection: "row",
+    marginBottom: 14,
+  },
+  liveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  liveBadgeText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 12,
+  },
+  routeRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 14,
+  },
+  routeIconWrap: {
+    width: 40,
+    alignItems: "center",
+    paddingTop: 2,
+  },
+  routeIconImg: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+  },
+  routePrimary: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.textPrimary,
+    marginBottom: 2,
+  },
+  routeSecondary: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 13,
+    color: Colors.textMuted,
+    lineHeight: 19,
+  },
+  pickupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  vehicleImg: {
+    width: 60,
+    height: 44,
+  },
+  pickupLabel: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 14,
+    color: Colors.textPrimary,
+    marginBottom: 2,
+  },
+  pickupTime: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  pickupDate: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 13,
+    color: Colors.textPrimary,
+    marginTop: 1,
+  },
+  paymentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 4,
+  },
+  paymentIconWrap: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  paymentLabel: {
+    flex: 1,
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.textPrimary,
+  },
+  paymentPrice: {
+    fontFamily: "HelveticaNeue-CondensedBold",
+    fontSize: 15,
+    color: Colors.textPrimary,
+    letterSpacing: 0.1,
+  },
+  cancelBtn: {
+    marginTop: 20,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#EF4444",
+  },
+  cancelBtnText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: "#EF4444",
+  },
+  trackBtn: {
+    marginTop: 20,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: "center",
+    backgroundColor: Colors.navy,
+  },
+  trackBtnText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.white,
+  },
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white },
@@ -410,6 +841,7 @@ const styles = StyleSheet.create({
   },
   tabs: { flex: 1, flexDirection: "row" },
   tab: { paddingVertical: 12, paddingRight: 28, position: "relative" },
+  tabLabelRow: { flexDirection: "row", alignItems: "center" },
   tabLabel: {
     fontFamily: "Poppins-Regular",
     fontSize: 15,
@@ -432,15 +864,6 @@ const styles = StyleSheet.create({
   },
   filterBtn: { padding: 8 },
   filterBtnActive: { backgroundColor: Colors.navy, borderRadius: 8 },
-  filterBadge: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: Colors.primary,
-  },
   scroll: { paddingHorizontal: 20, paddingTop: 16 },
   emptyState: { alignItems: "center", paddingTop: 60 },
   emptyText: {
@@ -448,8 +871,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Colors.textMuted,
   },
-
-  // Past orders
   monthRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -498,80 +919,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
   repeatBtn: { padding: 6 },
-
-  // Active order cards
-  activeCard: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
-  },
-  activeCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText: { fontFamily: "Poppins-SemiBold", fontSize: 12 },
-  activeDate: {
-    fontFamily: "Poppins-Regular",
-    fontSize: 12,
-    color: Colors.textMuted,
-  },
-  routeRow: { flexDirection: "row", gap: 12, marginBottom: 14 },
-  routeDots: { width: 16, alignItems: "center", paddingTop: 3 },
-  dotPickup: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: Colors.navy,
-    marginBottom: 2,
-  },
-  routeLine: {
-    width: 1.5,
-    flex: 1,
-    backgroundColor: Colors.border,
-    marginVertical: 3,
-  },
-  routeAddresses: { flex: 1, justifyContent: "space-between" },
-  routeAddr: {
-    fontFamily: "Poppins-Regular",
-    fontSize: 13,
-    color: Colors.textPrimary,
-    lineHeight: 18,
-  },
-  activeCardFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    paddingTop: 12,
-  },
-  activePrice: {
-    fontFamily: "HelveticaNeue-CondensedBold",
-    fontSize: 15,
-    color: Colors.textPrimary,
-    letterSpacing: 0.1,
-  },
-  activeVehicle: {
-    flex: 1,
-    fontFamily: "Poppins-Regular",
-    fontSize: 12,
-    color: Colors.textMuted,
-  },
-  cancelBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: Colors.cancelRed,
-  },
-  cancelBtnText: {
-    fontFamily: "Poppins-SemiBold",
-    fontSize: 13,
-    color: Colors.cancelRed,
-  },
 });
+
+

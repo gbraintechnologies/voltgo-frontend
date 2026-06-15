@@ -43,21 +43,21 @@ const NETWORKS: {
   {
     id: "mtn_momo",
     label: "MTN",
-    display: "MTN",
+    display: "MTN",        // unchanged
     color: "#FFCB00",
     textColor: "#0B1F3A",
   },
   {
-    id: "telecel",
+    id: "vodafone_cash",
     label: "Tel",
-    display: "Telecel",
+    display: "Tel",        // was "Telecel"
     color: "#E2001A",
     textColor: "#FFFFFF",
   },
   {
     id: "airteltigo",
     label: "AT",
-    display: "AirtelTigo",
+    display: "AT",         // was "AirtelTigo"
     color: "#0066B3",
     textColor: "#FFFFFF",
   },
@@ -303,23 +303,26 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     letterSpacing: 0.1,
   },
-  networkRow: { flexDirection: "row", gap: 10, marginBottom: 24 },
+  networkRow: { 
+    flexDirection: "row", 
+    gap: 10, 
+    marginBottom: 24,
+  },
   networkChip: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: 'center',
+    gap: 6,
     paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,   // reduced from 12
     borderRadius: 16,
     backgroundColor: Colors.white,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+    borderWidth: 2,                    // always reserve border space
+    borderColor: "transparent",        // invisible by default — no layout shift
+    // removed all shadow props
   },
-  networkChipActive: { borderColor: Colors.navy, borderWidth: 2 },
+  networkChipActive: { borderColor: Colors.navy},
   networkBadge: {
     width: 34,
     height: 22,

@@ -26,6 +26,8 @@ import SearchMagnifySvg from "../../assets/icons/search_magnify.svg";
 import { useRoutePolyline } from "../../utils/useRoutePolyline";
 // import { GOOGLE_MAPS_API_KEY } from "../../utils/mapsConfig";
 import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
+import { useOrderPolling } from "@/hooks/useApi";
+import { useOrderSocket } from "@/hooks/useOrderSocket";
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -68,6 +70,7 @@ function CustomBottomSheet({
   ).current;
   const currentSnapIndex = useRef(initialSnapIndex);
   const lastGestureY = useRef(snapPoints[initialSnapIndex]);
+  const isDragging = useRef(false);
 
   const snapTo = useCallback(
     (index: number) => {
@@ -85,33 +88,38 @@ function CustomBottomSheet({
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 4,
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, { dx, dy }) => {
+        const isVertical = Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 4;
+        if (isVertical) isDragging.current = true;
+        return isVertical;
+      },
       onPanResponderGrant: () => {
+        isDragging.current = false;
         translateY.stopAnimation((val) => {
           lastGestureY.current = val;
           translateY.setOffset(val);
           translateY.setValue(0);
         });
       },
-      onPanResponderMove: (_, gs) => {
+      onPanResponderMove: (_, { dy }) => {
         const minY = snapPoints[snapPoints.length - 1];
-        const nextVal = lastGestureY.current + gs.dy;
+        const nextVal = lastGestureY.current + dy;
         const clamped = Math.max(
           minY - 24,
           Math.min(SCREEN_HEIGHT * 0.9, nextVal),
         );
         translateY.setValue(clamped - lastGestureY.current);
       },
-      onPanResponderRelease: (_, gs) => {
+      onPanResponderRelease: (_, { dy, vy }) => {
+        isDragging.current = false;
         translateY.flattenOffset();
-        const currentY = lastGestureY.current + gs.dy;
-        const velocity = gs.vy;
+        const currentY = lastGestureY.current + dy;
         let targetIndex = currentSnapIndex.current;
 
-        if (velocity > 0.5) {
+        if (vy > 0.5) {
           targetIndex = Math.max(0, currentSnapIndex.current - 1);
-        } else if (velocity < -0.5) {
+        } else if (vy < -0.5) {
           targetIndex = Math.min(
             snapPoints.length - 1,
             currentSnapIndex.current + 1,
@@ -132,17 +140,26 @@ function CustomBottomSheet({
         Animated.spring(translateY, {
           toValue: snapPoints[targetIndex],
           useNativeDriver: true,
-          velocity: gs.vy,
+          velocity: vy,
           tension: 68,
           friction: 12,
         }).start();
+      },
+      onPanResponderTerminate: () => {
+        isDragging.current = false;
+        translateY.flattenOffset();
+        snapTo(currentSnapIndex.current);
       },
     }),
   ).current;
 
   return (
-    <Animated.View style={[sheetStyles.sheet, { transform: [{ translateY }] }]}>
-      <View {...panResponder.panHandlers} style={sheetStyles.handleArea}>
+    <Animated.View
+      style={[sheetStyles.sheet, { transform: [{ translateY }] }]}
+      {...panResponder.panHandlers}
+    >
+      {/* Handle — decorative only */}
+      <View style={sheetStyles.handleArea}>
         <View style={sheetStyles.handle} />
       </View>
       {children}
@@ -175,8 +192,13 @@ export default function RiderMatchingScreen() {
   const route = useRoute<RouteParams>();
   const params = route.params ?? {};
 
+  const orderId = (params as any).orderId as string | undefined;
+
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const mapRef = useRef<MapView>(null);
+
+  const { data: orderRes } = useOrderPolling(orderId ?? "");
+  const order = orderRes?.data;
 
   const snapPoints = useMemo(
     () => SNAP_PERCENTAGES.map((pct) => SCREEN_HEIGHT * (1 - pct)),
@@ -232,19 +254,45 @@ export default function RiderMatchingScreen() {
 
   // Simulate rider found after 4s
   useEffect(() => {
-    const timer = setTimeout(() => {
-      navigation.replace("RiderFound", {
-        ...params,
-        riderName: "John Cena",
-        riderPlate: "GHA - 2233343 -4",
-        riderRating: 4.5,
-        vehicleType: params.vehicleType ?? "bicycle",
-        pickupCoords: pickupCoord,
-        dropoffCoords: dropoffCoord,
-      });
-    }, 4000);
-    return () => clearTimeout(timer);
-  }, []);
+  if (!order) return;
+  if (
+    (order.status === "assigned" || order.status === "rider_arriving") &&
+    order.rider
+  ) {
+    navigation.replace("RiderFound", {
+      ...params,
+      orderId,
+      riderName: order.rider.fullName ?? order.rider.full_name ?? "Your Rider",
+      riderPlate: order.rider.vehicle?.plate_no ?? "",
+      riderRating: order.rider.rating ?? 5,
+      vehicleType: params.vehicleType ?? "bicycle",
+      pickupCoords: pickupCoord,
+      dropoffCoords: dropoffCoord,
+    });
+  } else if (order.status === "cancelled" || order.status === "failed") {
+    navigation.navigate("HomeMap");
+  }
+}, [order?.status]);
+
+  useOrderSocket({
+    orderId: orderId ?? "",
+    onStatusChanged: (payload: any) => {
+      if (payload.status === "rider_arriving") {
+        navigation.replace("RiderFound", {
+          ...params,
+          orderId,
+          riderName:
+            payload.rider?.full_name ?? payload.rider?.fullName ?? "Your Rider",
+          riderPlate:
+            payload.rider?.vehicle?.plate_no ?? payload.rider?.plate_no ?? "",
+          riderRating: payload.rider?.rating ?? 5,
+          riderPhoto: payload.rider?.photo_url ?? null,
+          pickupCoords: pickupCoord,
+          dropoffCoords: dropoffCoord,
+        });
+      }
+    },
+  });
 
   const displayEta = etaMinutes ?? 33;
 

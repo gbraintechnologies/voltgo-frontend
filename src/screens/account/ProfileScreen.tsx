@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
-import { useCustomerProfile } from "../../hooks/useApi";
+import { useCustomerProfile, useUpdateProfile } from "../../hooks/useApi";
 import { useAuthStore } from "../../stores/authStore";
 
 const Colors = {
@@ -43,6 +43,8 @@ export default function ProfileScreen() {
   const [email, setEmail] = useState(profile?.email ?? "");
   const [phone, setPhone] = useState(profile?.phone ?? "");
 
+  const updateMutation = useUpdateProfile();
+
   // Sync fields when profile loads
   useEffect(() => {
     if (profile) {
@@ -61,8 +63,17 @@ export default function ProfileScreen() {
   }, []);
 
   // Profile editing is not yet in the API - show placeholder save
-  const handleSave = () => {
-    Alert.alert("Saved", "Profile update coming soon.");
+  const handleSave = async () => {
+    try {
+      await updateMutation.mutateAsync({
+        full_name: name || undefined,
+        email: email || undefined,
+      });
+      Alert.alert("Saved", "Profile updated successfully.");
+      navigation.navigate('Account')
+    } catch (_) {
+      Alert.alert("Error", "Could not save profile. Please try again.");
+    }
   };
 
   return (
@@ -148,6 +159,7 @@ export default function ProfileScreen() {
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.saveBtn}
+          disabled={updateMutation.isPending}
           activeOpacity={0.85}
           onPress={handleSave}
         >

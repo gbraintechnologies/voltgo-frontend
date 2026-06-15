@@ -12,7 +12,12 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
-import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
+import {
+  useNavigation,
+  useRoute,
+  RouteProp,
+  CommonActions,
+} from "@react-navigation/native";
 import { DeliveryStackParamList } from "../../navigation/types";
 import CloseXSvg from "../../assets/icons/arrow_back.svg";
 import ChevronRightSvg from "../../assets/icons/chevron_right.svg";
@@ -39,7 +44,6 @@ export default function PayWithScreen() {
   const toast = useToast();
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
-  const { vehicleType, price, pickup, dropoff } = route.params ?? {};
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const fadeIn = useRef(new Animated.Value(0)).current;
@@ -47,6 +51,16 @@ export default function PayWithScreen() {
 
   const { data: optionsRes, isLoading } = usePaymentOptions();
   const bookMutation = useBookDelivery();
+
+  const {
+    vehicleType,
+    price,
+    pickup,
+    dropoff,
+    pickupCoords,
+    dropoffCoords,
+    returnTo,
+  } = route.params ?? {};
 
   const rawData = optionsRes?.data as any;
   const paymentOptions: any[] = [
@@ -56,7 +70,8 @@ export default function PayWithScreen() {
             id: "bundle_credit",
             type: "bundle_credit",
             label: "Bundle Credit",
-            sub: `${rawData.bundle_credit.remaining_deliveries ?? 0} deliveries remaining`,
+            sub: `${rawData.bundle_credit.credits_remaining ?? 0} deliveries remaining`,
+
             is_default: false,
           },
         ]
@@ -89,35 +104,74 @@ export default function PayWithScreen() {
   // Auto-select default or first option
   useEffect(() => {
     if (paymentOptions.length && !selectedId) {
+      const availableOptions = paymentOptions.filter((p: any) => {
+        if (p.type === "bundle_credit") {
+          return (rawData?.bundle_credit?.credits_remaining ?? 0) > 0; // ← fix here too
+        }
+        return true;
+      });
       const def =
-        paymentOptions.find((p: any) => p.is_default) ?? paymentOptions[0];
-      setSelectedId(def.id);
+        availableOptions.find((p: any) => p.is_default) ?? availableOptions[0];
+      if (def) setSelectedId(def.id);
     }
   }, [paymentOptions]);
 
   const selected = paymentOptions.find((p: any) => p.id === selectedId);
 
   const handleProceed = async () => {
+    console.log("handleProceed fired", { selected, returnTo, selectedId });
+
     if (!selected) {
       toast.warning("Please select a payment method.");
       return;
     }
 
+    if (returnTo === "ReviewDelivery") {
+      const paymentMethod = {
+        id: selected.id,
+        label: selected.label,
+        method:
+          selected.type === "bundle_credit"
+            ? "bundle" // ← was "bundle_credit"
+            : selected.provider,
+        payment_method_id:
+          selected.type !== "bundle_credit" ? selected.id : undefined,
+      };
+
+      const state = navigation.getState();
+      const reviewRoute = state.routes
+        .slice()
+        .reverse()
+        .find((r: any) => r.name === "ReviewDelivery");
+
+      if (reviewRoute) {
+        navigation.dispatch({
+          ...CommonActions.setParams({ selectedPaymentMethod: paymentMethod }),
+          source: reviewRoute.key,
+        });
+      }
+
+      navigation.goBack();
+      return;
+    }
+    // Normal PayWith flow: book directly
     try {
       const res = await bookMutation.mutateAsync({
         pickup_address: pickup ?? "Unknown",
-        pickup_lat: 5.6501,
-        pickup_lng: -0.1862,
+        pickup_lat: pickupCoords?.latitude ?? 5.6501,
+        pickup_lng: pickupCoords?.longitude ?? -0.1862,
         dropoff_address: dropoff ?? "Unknown",
-        dropoff_lat: 5.6508,
-        dropoff_lng: -0.187,
+        dropoff_lat: dropoffCoords?.latitude ?? 5.6508,
+        dropoff_lng: dropoffCoords?.longitude ?? -0.187,
         item_description: "Package",
         vehicle_type: vehicleType === "bicycle" ? "bicycle" : "motorcycle",
         payment_method:
-          selected.type === "bundle_credit" ? "bundle_credit" : selected.id,
+          selected.type === "bundle_credit"
+            ? "bundle" // ← fix
+            : selected.provider,
         payment_method_id:
           selected.type !== "bundle_credit" ? selected.id : undefined,
-        price_ghs: price ?? 0,
+        price_ghs: Number(price ?? 0),
       });
 
       navigation.navigate("RiderMatching", {
@@ -125,6 +179,9 @@ export default function PayWithScreen() {
         dropoff,
         vehicleType,
         paymentMethod: selected.label,
+        orderId: res.data.id,
+        pickupCoords,
+        dropoffCoords,
       });
     } catch (err) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -179,59 +236,76 @@ export default function PayWithScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          paymentOptions.map((option: any) => (
-            <TouchableOpacity
-              key={option.id}
-              style={[
-                styles.optionRow,
-                selectedId === option.id && styles.optionRowActive,
-              ]}
-              onPress={() => setSelectedId(option.id)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.optionIcon}>
-                {option.type === "bundle_credit" ? (
-                  <WalletSvg width={24} height={24} />
-                ) : option.type === "momo" ? (
-                  <Image
-                    source={require("../../assets/images/mtn_logo.png")}
-                    style={{ width: 32, height: 32 }}
-                    resizeMode="contain"
-                  />
-                ) : (
-                  <Image
-                    source={require("../../assets/images/visa_logo.png")}
-                    style={{ width: 36, height: 24 }}
-                    resizeMode="contain"
-                  />
-                )}
-              </View>
-              <View style={styles.optionInfo}>
-                <Text style={styles.optionLabel}>{option.label}</Text>
-                {option.sub ? (
-                  <Text style={styles.optionSub}>{option.sub}</Text>
-                ) : null}
-              </View>
-              <View
-                style={[
-                  styles.radio,
-                  selectedId === option.id && styles.radioActive,
-                ]}
-              >
-                {selectedId === option.id && <View style={styles.radioInner} />}
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
+          <>
+            {paymentOptions.map((option: any) => {
+              const isExhausted =
+                option.type === "bundle_credit" &&
+                (rawData?.bundle_credit?.credits_remaining ?? 0) <= 0;
 
-        <TouchableOpacity
-          style={styles.addMethodRow}
-          onPress={() => navigation.navigate("AddPaymentMethod")}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.addMethodText}>+ Add Payment Method</Text>
-          <ChevronRightSvg width={18} height={18} />
-        </TouchableOpacity>
+              return (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.optionRow,
+                    selectedId === option.id && styles.optionRowActive,
+                    isExhausted && styles.optionRowDisabled,
+                  ]}
+                  onPress={() => {
+                    if (isExhausted) return;
+                    setSelectedId(option.id);
+                  }}
+                  activeOpacity={isExhausted ? 1 : 0.8}
+                >
+                  <View style={styles.optionIcon}>
+                    {option.type === "bundle_credit" ? (
+                      <WalletSvg width={24} height={24} />
+                    ) : option.type === "momo" ? (
+                      <Image
+                        source={require("../../assets/images/mtn_logo.png")}
+                        style={{ width: 32, height: 32 }}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <Image
+                        source={require("../../assets/images/visa_logo.png")}
+                        style={{ width: 36, height: 24 }}
+                        resizeMode="contain"
+                      />
+                    )}
+                  </View>
+                  <View style={styles.optionInfo}>
+                    <Text style={styles.optionLabel}>{option.label}</Text>
+                    {option.sub ? (
+                      <Text style={styles.optionSub}>{option.sub}</Text>
+                    ) : null}
+                    {isExhausted && (
+                      <Text style={styles.exhaustedLabel}>No credits left</Text>
+                    )}
+                  </View>
+                  <View
+                    style={[
+                      styles.radio,
+                      selectedId === option.id && styles.radioActive,
+                    ]}
+                  >
+                    {selectedId === option.id && (
+                      <View style={styles.radioInner} />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity
+              style={styles.addMethodRow}
+              onPress={() => navigation.navigate("AddPaymentMethod")}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.addMethodText}>+ Add Payment Method</Text>
+              <ChevronRightSvg width={18} height={18} />
+            </TouchableOpacity>
+          </>
+        )}
       </Animated.ScrollView>
 
       {price !== undefined && (
@@ -249,7 +323,9 @@ export default function PayWithScreen() {
               <ActivityIndicator color={Colors.white} />
             ) : (
               <Text style={styles.confirmBtnText}>
-                Confirm · GHS {price?.toFixed(2) ?? "0.00"}
+                {returnTo === "ReviewDelivery"
+                  ? "Use this payment method"
+                  : `Confirm · GHS ${price?.toFixed(2) ?? "0.00"}`}
               </Text>
             )}
           </TouchableOpacity>
@@ -387,4 +463,17 @@ const styles = StyleSheet.create({
     color: Colors.white,
     letterSpacing: 0.3,
   },
+  optionRowDisabled: {
+    opacity: 0.45,
+    borderColor: Colors.border,
+  },
+  exhaustedLabel: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 11,
+    color: "#EF4444",
+    marginTop: 3,
+  },
 });
+
+
+

@@ -91,6 +91,13 @@ export const authApi = {
     };
   },
 
+  updateProfile: (body: { fullName?: string; email?: string }) =>
+    api.patch<{ success: boolean; data: CustomerProfile }>(
+      "/customer/auth/profile",
+      body,
+      true,
+    ),
+
   /** Logout - revokes refresh token */
   logout: async (refreshToken: string) => {
     await api.post<{ success: boolean }>(
@@ -101,7 +108,5 @@ export const authApi = {
     await tokenStorage.clearTokens();
   },
 };
-
-
 
 

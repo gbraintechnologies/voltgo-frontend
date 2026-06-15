@@ -9,16 +9,21 @@ import {
   Platform,
   ActivityIndicator,
   Image,
-  Alert,
+  Modal,
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
 import WalletSvg from "../../assets/icons/medal_icon.svg";
-import { usePurchaseBundle, usePaymentOptions } from "../../hooks/useApi";
+import {
+  usePurchaseBundle,
+  usePaymentMethods,
+  useVerifyPaystack,
+} from "../../hooks/useApi";
 import { ApiError } from "../../api/client";
 import { BundleProduct } from "../../api/bundles";
 import { useToast } from "@/components/common/Toast";
 import * as Haptics from "expo-haptics";
+import WebView from "react-native-webview";
 
 const Colors = {
   white: "#FFFFFF",
@@ -31,10 +36,21 @@ const Colors = {
   inputBg: "#eeeeee",
 };
 
+// API returns price_ghs as a string e.g. "0.99" — always parse before toFixed
+function formatPrice(price: string | number | undefined): string {
+  if (price == null) return "—";
+  const n = parseFloat(String(price));
+  return isNaN(n) ? "—" : n.toFixed(2);
+}
+
 export default function BundlePaymentScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const plan: BundleProduct | undefined = route.params?.plan;
+
+  const [paystackUrl, setPaystackUrl] = useState<string | null>(null);
+  const [pendingReference, setPendingReference] = useState<string | null>(null);
+  const verifyMutation = useVerifyPaystack();
 
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(
     null,
@@ -42,12 +58,27 @@ export default function BundlePaymentScreen() {
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(16)).current;
 
-  const { data: optionsRes, isLoading: optionsLoading } = usePaymentOptions();
+  // usePaymentMethods → GET /payment-methods (works reliably)
+  // usePaymentOptions → GET /payment-methods/options (unreliable, skip it)
+  const { data: methodsRes, isLoading: optionsLoading } = usePaymentMethods();
   const purchaseMutation = usePurchaseBundle();
-
-  const paymentOptions = optionsRes?.data ?? [];
-
   const toast = useToast();
+
+  // Normalise PaymentMethod[] into the shape the UI expects
+  const methodsData = methodsRes?.data as any;
+
+  const rawMethods: any[] = Array.isArray(methodsData)
+    ? methodsData
+    : Array.isArray(methodsData?.data)
+      ? methodsData.data
+      : [];
+  const paymentOptions: any[] = rawMethods.map((m: any) => ({
+    ...m,
+    label:
+      m.account_name ??
+      (m.type === "card" ? `Card ····${m.card_last4 ?? ""}` : "Mobile Money"),
+    sub: m.account_number ?? m.provider ?? "",
+  }));
 
   useEffect(() => {
     if (paymentOptions.length && !selectedPaymentId) {
@@ -74,14 +105,16 @@ export default function BundlePaymentScreen() {
   }, []);
 
   const handleConfirmPayment = async () => {
-    if (!plan) return;
+    if (!plan || !selectedPaymentId) return;
     try {
-      await purchaseMutation.mutateAsync({
+      const res = await purchaseMutation.mutateAsync({
         bundle_product_id: plan.id,
+        payment_method_id: selectedPaymentId,
         auto_renew: false,
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      navigation.navigate("BundleSuccess");
+      const { authorization_url, reference } = res.data.checkout;
+      setPendingReference(reference);
+      setPaystackUrl(authorization_url);
     } catch (err) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       toast.error(
@@ -89,6 +122,29 @@ export default function BundlePaymentScreen() {
           ? err.message
           : "Purchase failed. Please try again.",
       );
+    }
+  };
+
+  const handleWebViewNav = async (navState: { url: string }) => {
+    if (
+      navState.url.includes("voltgoapp.com") ||
+      !navState.url.includes("paystack")
+    ) {
+      setPaystackUrl(null);
+      if (pendingReference) {
+        try {
+          await verifyMutation.mutateAsync(pendingReference);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          navigation.navigate("BundleSuccess");
+        } catch (err) {
+          toast.error(
+            err instanceof ApiError
+              ? err.message
+              : "Payment verification failed.",
+          );
+        }
+        setPendingReference(null);
+      }
     }
   };
 
@@ -123,8 +179,9 @@ export default function BundlePaymentScreen() {
                 {plan.credits} deliveries · {plan.validity_days} days
               </Text>
             </View>
+            {/* formatPrice handles string or number from API */}
             <Text style={styles.planSummaryPrice}>
-              GHS {plan.price_ghs.toFixed(2)}
+              GHS {formatPrice(plan.price_ghs)}
             </Text>
           </View>
         )}
@@ -139,84 +196,30 @@ export default function BundlePaymentScreen() {
           />
         ) : paymentOptions.length === 0 ? (
           <View style={styles.emptyPayment}>
-            <View
-              style={{
-                width: 72,
-                height: 72,
-                borderRadius: 36,
-                backgroundColor: Colors.inputBg,
-                alignItems: "center",
-                justifyContent: "center",
-                marginBottom: 8,
-              }}
-            >
+            <View style={styles.emptyIconRing}>
               <WalletSvg width={30} height={30} />
             </View>
-            <Text
-              style={{
-                fontFamily: "HelveticaNeue-CondensedBold",
-                fontSize: 17,
-                color: Colors.textPrimary,
-              }}
-            >
-              No payment methods
-            </Text>
-            <Text
-              style={[
-                styles.emptyPaymentText,
-                { textAlign: "center", maxWidth: 210 },
-              ]}
-            >
+            <Text style={styles.emptyTitle}>No payment methods</Text>
+            <Text style={styles.emptyPaymentText}>
               Add a Mobile Money or card to complete your purchase.
             </Text>
             <TouchableOpacity
-              style={{
-                backgroundColor: Colors.navy,
-                borderRadius: 12,
-                paddingVertical: 13,
-                paddingHorizontal: 0,
-                width: "100%",
-                alignItems: "center",
-                marginTop: 4,
-              }}
+              style={styles.addMomoBtn}
               onPress={() =>
                 navigation.navigate("DeliveryFlow", {
                   screen: "AddMobileMoney",
                 })
               }
             >
-              <Text
-                style={{
-                  fontFamily: "Poppins-SemiBold",
-                  fontSize: 14,
-                  color: Colors.primary,
-                }}
-              >
-                + Add Mobile Money
-              </Text>
+              <Text style={styles.addMomoBtnText}>+ Add Mobile Money</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={{
-                borderWidth: 1.5,
-                borderColor: Colors.border,
-                borderRadius: 12,
-                paddingVertical: 12,
-                width: "100%",
-                alignItems: "center",
-              }}
+              style={styles.addCardBtn}
               onPress={() =>
                 navigation.navigate("DeliveryFlow", { screen: "AddCard" })
               }
             >
-              <Text
-                style={{
-                  fontFamily: "Poppins-SemiBold",
-                  fontSize: 14,
-                  color: Colors.textPrimary,
-                }}
-              >
-                + Add Card
-              </Text>
+              <Text style={styles.addCardBtnText}>+ Add Card</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -287,6 +290,29 @@ export default function BundlePaymentScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Paystack WebView Modal */}
+      <Modal
+        visible={!!paystackUrl}
+        animationType="slide"
+        onRequestClose={() => setPaystackUrl(null)}
+      >
+        <View style={{ flex: 1, paddingTop: Platform.OS === "ios" ? 50 : 30 }}>
+          <TouchableOpacity
+            onPress={() => setPaystackUrl(null)}
+            style={{ padding: 16 }}
+          >
+            <Text style={styles.cancelPaymentText}>✕ Cancel Payment</Text>
+          </TouchableOpacity>
+          {paystackUrl && (
+            <WebView
+              source={{ uri: paystackUrl }}
+              onNavigationStateChange={handleWebViewNav}
+              startInLoadingState
+            />
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -391,15 +417,50 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.navy,
   },
   emptyPayment: { alignItems: "center", paddingVertical: 24, gap: 12 },
+  emptyIconRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.inputBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyTitle: {
+    fontFamily: "HelveticaNeue-CondensedBold",
+    fontSize: 17,
+    color: Colors.textPrimary,
+  },
   emptyPaymentText: {
     fontFamily: "Poppins-Regular",
     fontSize: 14,
     color: Colors.textMuted,
+    textAlign: "center",
+    maxWidth: 210,
   },
-  addPaymentLink: {
+  addMomoBtn: {
+    backgroundColor: Colors.navy,
+    borderRadius: 12,
+    paddingVertical: 13,
+    width: "100%",
+    alignItems: "center",
+  },
+  addMomoBtnText: {
     fontFamily: "Poppins-SemiBold",
     fontSize: 14,
-    color: Colors.navy,
+    color: Colors.primary,
+  },
+  addCardBtn: {
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingVertical: 12,
+    width: "100%",
+    alignItems: "center",
+  },
+  addCardBtnText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.textPrimary,
   },
   footer: {
     paddingHorizontal: 20,
@@ -418,5 +479,10 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: Colors.textPrimary,
     letterSpacing: 0.3,
+  },
+  cancelPaymentText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.navy,
   },
 });

@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Colors, Spacing, Radius } from "../../theme";
 import { RootStackParamList } from "../../navigation/types";
+import { useAuthStore } from "../../stores/authStore";
 
 const { width, height } = Dimensions.get("window");
 const HERO_HEIGHT = height * 0.58;
@@ -26,6 +27,8 @@ export default function OnboardingScreen({ navigation }: Props) {
   const slideUp = useRef(new Animated.Value(40)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
   const imgScale = useRef(new Animated.Value(0.92)).current;
+
+  const setHasSeenOnboarding = useAuthStore((s) => s.setHasSeenOnboarding);
 
   useEffect(() => {
     Animated.parallel([
@@ -51,13 +54,17 @@ export default function OnboardingScreen({ navigation }: Props) {
     ]).start();
   }, []);
 
+  const handleGetStarted = async () => {
+    await setHasSeenOnboarding(); // persisted before navigating
+    navigation.navigate("PhoneAuth");
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={Colors.primary} />
 
       {/* Hero */}
       <View style={[styles.heroSection, { marginTop: insets.top + 12 }]}>
-        {/* <Text style={styles.watermark}>VoltGO</Text> */}
         <Animated.View
           style={[
             styles.illustrationWrap,
@@ -66,10 +73,7 @@ export default function OnboardingScreen({ navigation }: Props) {
         >
           <Image
             source={require("../../../assets/images/OB1.png")}
-            style={{
-              width: width * 1.2,
-              height: HERO_HEIGHT * 1.1,
-            }}
+            style={{ width: width * 1.2, height: HERO_HEIGHT * 1.1 }}
             resizeMode="contain"
           />
         </Animated.View>
@@ -92,7 +96,7 @@ export default function OnboardingScreen({ navigation }: Props) {
         <TouchableOpacity
           style={[styles.button, { marginBottom: insets.bottom + 16 }]}
           activeOpacity={0.82}
-          onPress={() => navigation.navigate("PhoneAuth")}
+          onPress={handleGetStarted}
         >
           <Text style={styles.buttonText}>Get started</Text>
         </TouchableOpacity>
@@ -103,35 +107,18 @@ export default function OnboardingScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white },
-
   heroSection: {
     height: HERO_HEIGHT,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 10,
   },
-
   illustrationWrap: {
     width: "100%",
     height: HERO_HEIGHT,
     justifyContent: "center",
     alignItems: "center",
   },
-  watermark: {
-    position: "absolute",
-    fontSize: 72,
-    fontFamily: "HelveticaNeue-CondensedBold",
-    color: "rgba(15,31,61,0.10)",
-    letterSpacing: -2,
-    top: "28%",
-    alignSelf: "center",
-  },
-
-  illustration: {
-    width: width * 0.9,
-    height: HERO_HEIGHT * 0.92,
-  },
-
   contentSection: {
     flex: 1,
     backgroundColor: Colors.white,
@@ -171,7 +158,3 @@ const styles = StyleSheet.create({
     color: "#161616",
   },
 });
-
-
-
-

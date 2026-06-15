@@ -29,6 +29,13 @@ const Colors = {
   inputBg: "#F2F4F7",
 };
 
+// API returns price_ghs as a string — parse before calling toFixed
+function formatPrice(price: string | number | undefined): string {
+  if (price == null) return "—";
+  const n = parseFloat(String(price));
+  return isNaN(n) ? "—" : n.toFixed(2);
+}
+
 const RenewIcon = () => (
   <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
     <Path
@@ -47,21 +54,12 @@ const RenewIcon = () => (
   </Svg>
 );
 
-const TopupIcon = () => (
-  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-    <Path
-      d="M13 2L4.5 13.5H12L11 22L19.5 10.5H12L13 2Z"
-      stroke={Colors.creditGreen}
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </Svg>
-);
-
 function formatDate(iso: string) {
   const d = new Date(iso);
-  return `${d.getDate()} ${d.toLocaleString("en", { month: "short" })} · ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+  return `${d.getDate()} ${d.toLocaleString("en", { month: "short" })} · ${d
+    .getHours()
+    .toString()
+    .padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
 }
 
 function groupByMonth(items: BundleHistoryItem[]) {
@@ -108,9 +106,7 @@ export default function BundleHistoryScreen() {
       </View>
 
       {isLoading ? (
-        <View
-          style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
-        >
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator size="large" color={Colors.navy} />
         </View>
       ) : (
@@ -121,57 +117,20 @@ export default function BundleHistoryScreen() {
         >
           {bundles.length === 0 ? (
             <View style={styles.emptyState}>
-              <View
-                style={{
-                  width: 72,
-                  height: 72,
-                  borderRadius: 36,
-                  backgroundColor: Colors.inputBg,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginBottom: 8,
-                }}
-              >
+              <View style={styles.emptyIconRing}>
                 <HistoryIconSvg width={30} height={30} />
               </View>
-              <Text
-                style={{
-                  fontFamily: "HelveticaNeue-CondensedBold",
-                  fontSize: 17,
-                  color: Colors.textPrimary,
-                }}
-              >
-                No bundles purchased yet
-              </Text>
-              <Text
-                style={[
-                  styles.emptyText,
-                  { textAlign: "center", maxWidth: 210, lineHeight: 20 },
-                ]}
-              >
+              <Text style={styles.emptyTitle}>No bundles purchased yet</Text>
+              <Text style={styles.emptyText}>
                 Once you buy a bundle, your history will show up here.
               </Text>
               <TouchableOpacity
-                style={{
-                  marginTop: 8,
-                  backgroundColor: Colors.primary,
-                  borderRadius: 12,
-                  paddingVertical: 12,
-                  paddingHorizontal: 28,
-                }}
+                style={styles.emptyCta}
                 onPress={() =>
                   navigation.navigate("BundlesFlow", { screen: "Topup" })
                 }
               >
-                <Text
-                  style={{
-                    fontFamily: "Poppins-SemiBold",
-                    fontSize: 14,
-                    color: Colors.textPrimary,
-                  }}
-                >
-                  Browse bundles
-                </Text>
+                <Text style={styles.emptyCtaText}>Browse bundles</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -181,6 +140,7 @@ export default function BundleHistoryScreen() {
                   <Text style={styles.monthHeader}>{month}</Text>
                   <View style={styles.monthLine} />
                 </View>
+
                 {items.map((item, index) => (
                   <View
                     key={item.id}
@@ -189,11 +149,10 @@ export default function BundleHistoryScreen() {
                       index < items.length - 1 && styles.historyRowBorder,
                     ]}
                   >
-                    <View
-                      style={[styles.iconWrap, { backgroundColor: "#E8F9EE" }]}
-                    >
+                    <View style={[styles.iconWrap, { backgroundColor: "#E8F9EE" }]}>
                       <RenewIcon />
                     </View>
+
                     <View style={styles.historyInfo}>
                       <Text style={styles.historyPlan}>
                         {item.product?.name ?? "Bundle"}
@@ -214,16 +173,13 @@ export default function BundleHistoryScreen() {
                         </Text>
                       </View>
                     </View>
+
                     <View style={styles.historyRight}>
+                      {/* formatPrice safely handles string, number, or undefined */}
                       <Text style={styles.historyAmount}>
-                        GHS {item.product?.price_ghs?.toFixed(2) ?? "—"}
+                        GHS {formatPrice(item.product?.price_ghs)}
                       </Text>
-                      <Text
-                        style={[
-                          styles.historyCredits,
-                          { color: Colors.creditGreen },
-                        ]}
-                      >
+                      <Text style={[styles.historyCredits, { color: Colors.creditGreen }]}>
                         +{item.credits_total} credits
                       </Text>
                     </View>
@@ -265,11 +221,40 @@ const styles = StyleSheet.create({
   },
   headerSpacer: { width: 32 },
   scroll: { paddingHorizontal: 20, paddingTop: 8 },
-  emptyState: { alignItems: "center", paddingTop: 60 },
+  emptyState: { alignItems: "center", paddingTop: 60, gap: 8 },
+  emptyIconRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.inputBg,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  emptyTitle: {
+    fontFamily: "HelveticaNeue-CondensedBold",
+    fontSize: 17,
+    color: Colors.textPrimary,
+  },
   emptyText: {
     fontFamily: "Poppins-Regular",
-    fontSize: 15,
+    fontSize: 13,
     color: Colors.textMuted,
+    textAlign: "center",
+    maxWidth: 210,
+    lineHeight: 20,
+  },
+  emptyCta: {
+    marginTop: 8,
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+  },
+  emptyCtaText: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.textPrimary,
   },
   monthRow: {
     flexDirection: "row",

@@ -103,6 +103,7 @@ function useCustomBottomSheet() {
   const translateY = useRef(new Animated.Value(initialOffset)).current;
   const lastTranslateY = useRef(initialOffset);
   const [isExpanded, setIsExpanded] = useState(false);
+  const isDragging = useRef(false);
 
   const springTo = useCallback(
     (toValue: number, expanded: boolean) => {
@@ -120,24 +121,29 @@ function useCustomBottomSheet() {
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 5,
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, { dx, dy }) => {
+        const isVertical = Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 4;
+        if (isVertical) isDragging.current = true;
+        return isVertical;
+      },
       onPanResponderGrant: () => {
+        isDragging.current = false;
         translateY.stopAnimation((currentValue) => {
           lastTranslateY.current = currentValue;
           translateY.setOffset(currentValue);
           translateY.setValue(0);
         });
       },
-      onPanResponderMove: (_, gs) => {
+      onPanResponderMove: (_, { dy }) => {
         const minDelta = SCREEN_H - FULL_H - lastTranslateY.current;
         const maxDelta = SCREEN_H - COLLAPSED_H + 40 - lastTranslateY.current;
-        translateY.setValue(Math.min(maxDelta, Math.max(minDelta, gs.dy)));
+        translateY.setValue(Math.min(maxDelta, Math.max(minDelta, dy)));
       },
-      onPanResponderRelease: (_, gs) => {
+      onPanResponderRelease: (_, { dy, vy }) => {
+        isDragging.current = false;
         translateY.flattenOffset();
-        const current = lastTranslateY.current + gs.dy;
-        const { vy } = gs;
+        const current = lastTranslateY.current + dy;
 
         if (vy > VELOCITY_THRESHOLD) {
           springTo(SCREEN_H - COLLAPSED_H, false);
@@ -159,6 +165,14 @@ function useCustomBottomSheet() {
           );
           springTo(nearest, nearest !== SCREEN_H - COLLAPSED_H);
         }
+      },
+      onPanResponderTerminate: () => {
+        isDragging.current = false;
+        translateY.flattenOffset();
+        springTo(
+          lastTranslateY.current,
+          lastTranslateY.current !== SCREEN_H - COLLAPSED_H,
+        );
       },
     }),
   ).current;
@@ -211,36 +225,54 @@ export default function SelectVehicleScreen() {
         ? "6 min"
         : "10 min";
 
+  // const handleContinue = () => {
+  //   if (isScheduled) {
+  //     navigation.navigate("ReviewDelivery", {
+  //       pickup,
+  //       dropoff,
+  //       pickupCoords: pickupCoord,
+  //       dropoffCoords: dropoffCoord,
+  //       itemType: (route.params as any)?.itemType ?? "",
+  //       weight: (route.params as any)?.weight ?? "lightweight",
+  //       specialInstructions: (route.params as any)?.specialInstructions,
+  //       vehicleType: selected,
+  //       price: selectedVehicle.price,
+  //       paymentMethod: "Bundle Credits",
+  //       isScheduled: true,
+  //       scheduledTime,
+  //     });
+  //   } else {
+  //     navigation.navigate("RiderMatching", {
+  //       pickup,
+  //       dropoff,
+  //       pickupCoords: pickupCoord,
+  //       dropoffCoords: dropoffCoord,
+  //       itemType: (route.params as any)?.itemType ?? "",
+  //       weight: (route.params as any)?.weight ?? "lightweight",
+  //       specialInstructions: (route.params as any)?.specialInstructions,
+  //       vehicleType: selected,
+  //       price: selectedVehicle.price,
+  //       paymentMethod: "Bundle Credits",
+  //     });
+  //   }
+  // };
+
   const handleContinue = () => {
-    if (isScheduled) {
-      navigation.navigate("ReviewDelivery", {
-        pickup,
-        dropoff,
-        pickupCoords: pickupCoord,
-        dropoffCoords: dropoffCoord,
-        itemType: (route.params as any)?.itemType ?? "",
-        weight: (route.params as any)?.weight ?? "lightweight",
-        specialInstructions: (route.params as any)?.specialInstructions,
-        vehicleType: selected,
-        price: selectedVehicle.price,
-        paymentMethod: "Bundle Credits",
-        isScheduled: true,
-        scheduledTime,
-      });
-    } else {
-      navigation.navigate("RiderMatching", {
-        pickup,
-        dropoff,
-        pickupCoords: pickupCoord,
-        dropoffCoords: dropoffCoord,
-        itemType: (route.params as any)?.itemType ?? "",
-        weight: (route.params as any)?.weight ?? "lightweight",
-        specialInstructions: (route.params as any)?.specialInstructions,
-        vehicleType: selected,
-        price: selectedVehicle.price,
-        paymentMethod: "Bundle Credits",
-      });
-    }
+    // Both scheduled and non-scheduled go through ReviewDelivery
+    // so payment is always required before an order is created
+    navigation.navigate("ReviewDelivery", {
+      pickup,
+      dropoff,
+      pickupCoords: pickupCoord,
+      dropoffCoords: dropoffCoord,
+      itemType: (route.params as any)?.itemType ?? "",
+      weight: (route.params as any)?.weight ?? "lightweight",
+      specialInstructions: (route.params as any)?.specialInstructions,
+      vehicleType: selected,
+      price: selectedVehicle.price,
+      isScheduled: !!isScheduled,
+      scheduledTime: scheduledTime ?? undefined,
+    });
   };
 
   const initialRegion = {
@@ -320,8 +352,9 @@ export default function SelectVehicleScreen() {
       {/* Bottom Sheet */}
       <Animated.View
         style={[styles.bottomSheet, { transform: [{ translateY }] }]}
+        {...panResponder.panHandlers}
       >
-        <View style={styles.handleArea} {...panResponder.panHandlers}>
+        <View style={styles.handleArea}>
           <View style={styles.handleBar} />
         </View>
 
@@ -365,7 +398,7 @@ export default function SelectVehicleScreen() {
           })}
 
           {/* Bundle Credits */}
-          <TouchableOpacity
+          {/* <TouchableOpacity
             style={styles.bundleRow}
             onPress={() =>
               navigation.navigate("PayWith", {
@@ -385,7 +418,7 @@ export default function SelectVehicleScreen() {
             <Text style={styles.bundleLabel}>Bundle Credits</Text>
             <Text style={styles.bundleCredits}>3 credits left</Text>
             <ChevronRightSvg width={8} height={14} style={{ marginLeft: 4 }} />
-          </TouchableOpacity>
+          </TouchableOpacity> */}
 
           {/* Continue */}
           <TouchableOpacity
@@ -580,6 +613,7 @@ const styles = StyleSheet.create({
     paddingVertical: 17,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 20
   },
   continueBtnText: {
     fontFamily: "Poppins-SemiBold",
@@ -588,3 +622,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 });
+

@@ -26,6 +26,8 @@ import BicycleSvg from "../../assets/icons/bicycle-5.svg";
 import StarSvg from "../../assets/icons/star.svg";
 import { useRoutePolyline } from "../../utils/useRoutePolyline";
 import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
+import { useOrderPolling } from "@/hooks/useApi";
+import { useOrderSocket } from "@/hooks/useOrderSocket";
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -60,44 +62,64 @@ function CustomBottomSheet({
   const translateY = useRef(
     new Animated.Value(snapPoints[initialSnapIndex]),
   ).current;
-  const currentSnapIndex = useRef(initialSnapIndex);
   const lastGestureY = useRef(snapPoints[initialSnapIndex]);
+  const isDragging = useRef(false);
+
+  const snapToPoint = useCallback(() => {
+    lastGestureY.current = snapPoints[0];
+    Animated.spring(translateY, {
+      toValue: snapPoints[0],
+      useNativeDriver: true,
+      tension: 68,
+      friction: 12,
+    }).start();
+  }, [snapPoints, translateY]);
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 4,
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, { dx, dy }) => {
+        const isVertical = Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 4;
+        if (isVertical) isDragging.current = true;
+        return isVertical;
+      },
       onPanResponderGrant: () => {
+        isDragging.current = false;
         translateY.stopAnimation((val) => {
           lastGestureY.current = val;
           translateY.setOffset(val);
           translateY.setValue(0);
         });
       },
-      onPanResponderMove: (_, gs) => {
+      onPanResponderMove: (_, { dy }) => {
         const minY = snapPoints[0];
+        // Allow slight over-drag up (-12) and a small bounce down (+30)
         const next = Math.max(
           minY - 12,
-          Math.min(minY + 30, lastGestureY.current + gs.dy),
+          Math.min(minY + 30, lastGestureY.current + dy),
         );
         translateY.setValue(next - lastGestureY.current);
       },
       onPanResponderRelease: () => {
+        isDragging.current = false;
         translateY.flattenOffset();
-        lastGestureY.current = snapPoints[0];
-        Animated.spring(translateY, {
-          toValue: snapPoints[0],
-          useNativeDriver: true,
-          tension: 68,
-          friction: 12,
-        }).start();
+        snapToPoint();
+      },
+      onPanResponderTerminate: () => {
+        isDragging.current = false;
+        translateY.flattenOffset();
+        snapToPoint();
       },
     }),
   ).current;
 
   return (
-    <Animated.View style={[sheetStyles.sheet, { transform: [{ translateY }] }]}>
-      <View {...panResponder.panHandlers} style={sheetStyles.handleArea}>
+    <Animated.View
+      style={[sheetStyles.sheet, { transform: [{ translateY }] }]}
+      {...panResponder.panHandlers}
+    >
+      {/* Handle — purely decorative, no panHandlers needed here */}
+      <View style={sheetStyles.handleArea}>
         <View style={sheetStyles.handle} />
       </View>
       {children}
@@ -130,6 +152,10 @@ export default function RiderFoundScreen() {
   const route = useRoute<RouteParams>();
   const mapRef = useRef<MapView>(null);
 
+  const orderId = (route.params as any)?.orderId as string | undefined;
+  const { data: orderRes } = useOrderPolling(orderId ?? "");
+  const orderStatus = orderRes?.data?.status;
+
   const {
     riderName = "John Cena",
     riderPlate = "GHA - 2233343 -4",
@@ -156,6 +182,14 @@ export default function RiderFoundScreen() {
   });
 
   useEffect(() => {
+    console.log("RiderFound params:", JSON.stringify(route.params, null, 2));
+    console.log(
+      "orderRes rider:",
+      JSON.stringify(orderRes?.data?.rider, null, 2),
+    );
+  }, [orderRes]);
+
+  useEffect(() => {
     if (!mapRef.current) return;
     const points =
       routeCoords.length > 0 ? routeCoords : [pickupCoord, dropoffCoord];
@@ -169,6 +203,35 @@ export default function RiderFoundScreen() {
       animated: true,
     });
   }, [routeCoords]);
+
+  useOrderSocket({
+    orderId: orderId ?? "",
+    onStatusChanged: (payload:any) => {
+      const status = payload.status as string;
+      if (status === "rider_arriving") {
+        navigation.replace("RiderArriving", {
+          // ✅ prefer socket payload fields, fall back to what was already in params
+          riderName:
+            payload.rider?.full_name ?? payload.rider?.fullName ?? riderName,
+          riderPlate:
+            payload.rider?.vehicle?.plate_no ??
+            payload.rider?.plate_no ??
+            riderPlate,
+          riderRating: payload.rider?.rating ?? riderRating,
+          riderPhoto:
+            payload.rider?.photo_url ??
+            (route.params as any)?.riderPhoto ??
+            null,
+          vehicleType,
+          pickup: route.params?.pickup,
+          dropoff: route.params?.dropoff,
+          pickupCoords: pickupCoord,
+          dropoffCoords: dropoffCoord,
+          orderId,
+        });
+      }
+    },
+  });
 
   const weightLabel =
     weight === "lightweight"
@@ -255,10 +318,12 @@ export default function RiderFoundScreen() {
 
       {/* Bottom Sheet */}
       <CustomBottomSheet snapPoints={snapPoints} initialSnapIndex={0}>
+        {/* scrollEnabled={false} — content fits at 82% height, no scroll conflict */}
         <ScrollView
           style={{ maxHeight: SCREEN_HEIGHT * 0.82 - 220 }}
           contentContainerStyle={styles.sheetContent}
           showsVerticalScrollIndicator={false}
+          scrollEnabled={false}
           bounces={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -269,7 +334,11 @@ export default function RiderFoundScreen() {
             <View style={styles.avatarContainer}>
               <View style={styles.avatarPlaceholder}>
                 <Image
-                  source={require("../../assets/images/rider_john.png")}
+                  source={
+                    (route.params as any)?.riderPhoto
+                      ? { uri: (route.params as any).riderPhoto }
+                      : require("../../assets/images/rider_john.png")
+                  }
                   style={styles.avatar}
                 />
               </View>
@@ -298,22 +367,35 @@ export default function RiderFoundScreen() {
 
         <View style={styles.sheetFooter}>
           <TouchableOpacity
-            style={styles.confirmBtn}
-            onPress={() =>
+            style={[
+              styles.confirmBtn,
+              !["assigned", "rider_arriving"].includes(orderStatus ?? "") && {
+                opacity: 0.5,
+              },
+            ]}
+            onPress={() => {
+              if (!["assigned", "rider_arriving"].includes(orderStatus ?? ""))
+                return;
               navigation.navigate("RiderArriving", {
                 riderName,
                 riderPlate,
                 riderRating,
+                riderPhoto: (route.params as any)?.riderPhoto ?? null, // ← add
                 vehicleType,
                 pickup: route.params?.pickup,
                 dropoff: route.params?.dropoff,
                 pickupCoords: pickupCoord,
                 dropoffCoords: dropoffCoord,
-              })
-            }
+                orderId: (route.params as any)?.orderId,
+              });
+            }}
             activeOpacity={0.85}
           >
-            <Text style={styles.confirmBtnText}>Confirm</Text>
+            <Text style={styles.confirmBtnText}>
+              {["assigned", "rider_arriving"].includes(orderStatus ?? "")
+                ? "Confirm"
+                : "Waiting for rider…"}
+            </Text>
           </TouchableOpacity>
           <View style={{ height: 12 }} />
           <TouchableOpacity

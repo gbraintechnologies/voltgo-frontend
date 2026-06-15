@@ -28,19 +28,28 @@ const Colors = {
   inputBg: "#F2F4F7",
 };
 
+// API returns price_ghs as a string e.g. "0.99" — always parse before calling
+// .toFixed() or doing arithmetic.
+function formatPrice(price: string | number): string {
+  return parseFloat(String(price)).toFixed(2);
+}
+
 export default function TopupScreen() {
   const navigation = useNavigation<any>();
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(16)).current;
 
+  // 404 from /bundles/my/active is expected when rider has no bundle — treat
+  // it as null rather than a hard error by ignoring the error state.
   const { data: activeBundleRes } = useActiveBundle();
   const { data: productsRes, isLoading } = useBundleProducts();
 
-  const activeBundle = activeBundleRes?.data;
+  // data will be null when the API returns 404 with data: null
+  const activeBundle = activeBundleRes?.data ?? null;
   const products: BundleProduct[] = productsRes?.data ?? [];
 
-  // Default to same product as active bundle
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
   useEffect(() => {
     if (activeBundle?.product?.id) {
       setSelectedId(activeBundle.product.id);
@@ -75,8 +84,10 @@ export default function TopupScreen() {
     });
   };
 
+  // Only fall back to activeBundle.product if nothing is selected from the
+  // products list — avoids showing a stale plan when fresh data has loaded.
   const displayPlan: BundleProduct | undefined =
-    selectedPlan ?? activeBundle?.product;
+    selectedPlan ?? (activeBundle?.product as BundleProduct | undefined);
 
   return (
     <View style={styles.container}>
@@ -111,8 +122,8 @@ export default function TopupScreen() {
             { opacity: fadeIn, transform: [{ translateY: slideUp }] },
           ]}
         >
-          {/* If multiple plans, show picker; otherwise single card */}
           {products.length > 1 ? (
+            // Multiple plans — scrollable picker
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 100 }}
@@ -142,8 +153,9 @@ export default function TopupScreen() {
                     </Text>
                   </View>
                   <View style={{ alignItems: "flex-end", gap: 8 }}>
+                    {/* formatPrice handles both string and number from API */}
                     <Text style={styles.planPrice}>
-                      GHS {plan.price_ghs.toFixed(2)}
+                      GHS {formatPrice(plan.price_ghs)}
                     </Text>
                     <View
                       style={[
@@ -159,7 +171,8 @@ export default function TopupScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          ) : displayPlan ? (
+          ) : products.length === 1 && displayPlan ? (
+            // Single plan — static selected card
             <View style={[styles.planCard, styles.planCardSelected]}>
               <Image
                 source={require("../../assets/images/medal_icon.png")}
@@ -175,17 +188,19 @@ export default function TopupScreen() {
                   Expires in {displayPlan.validity_days} days
                 </Text>
               </View>
-              <Text style={styles.planPrice}>
-                GHS {displayPlan.price_ghs.toFixed(2)}
-              </Text>
-              <View style={styles.radioOuter}>
-                <View style={styles.radioInner} />
+              <View style={{ alignItems: "flex-end", gap: 8 }}>
+                <Text style={styles.planPrice}>
+                  GHS {formatPrice(displayPlan.price_ghs)}
+                </Text>
+                <View style={[styles.radioOuter, styles.radioOuterActive]}>
+                  <View style={styles.radioInner} />
+                </View>
               </View>
             </View>
           ) : (
+            // No plans available
             <View style={styles.emptyWrap}>
               <View style={styles.emptyIconRing}>
-                {/* your WalletSvg or a bundle icon */}
                 <WalletSvg width={38} height={38} />
               </View>
               <Text style={styles.emptyTitle}>No plans available</Text>
@@ -207,7 +222,6 @@ export default function TopupScreen() {
         </Animated.View>
       )}
 
-      <View style={{ flex: 1 }} />
       <View style={styles.footer}>
         <TouchableOpacity
           style={[styles.proceedBtn, !selectedPlan && { opacity: 0.6 }]}
@@ -304,7 +318,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   radioOuterActive: {
-    borderColor: Colors.navy, // selected overrides
+    borderColor: Colors.navy,
     backgroundColor: Colors.navy,
   },
   radioInner: {
@@ -337,7 +351,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingBottom: 80,
-    gap: 0,
   },
   emptyIconRing: {
     width: 80,

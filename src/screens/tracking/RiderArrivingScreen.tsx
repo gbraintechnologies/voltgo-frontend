@@ -24,12 +24,14 @@ import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { DeliveryStackParamList } from "../../navigation/types";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
-import BicycleSvg from "../../assets/icons/bicycle.svg";
 import StarSvg from "../../assets/icons/star.svg";
 import PhoneCallSvg from "../../assets/icons/phone_call.svg";
 import ChatBubbleSvg from "../../assets/icons/chat_bubble.svg";
 import { useRoutePolyline } from "../../utils/useRoutePolyline";
 import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
+import BicycleSvg from "../../assets/icons/bicycle.svg"; // already used in RiderFoundScreen
+import MotorcycleSvg from "../../assets/icons/emoto.svg";
+import { useOrderSocket } from "@/hooks/useOrderSocket";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
@@ -78,10 +80,10 @@ function interpolateOnRoute(
 
 function useCustomBottomSheet() {
   const initialOffset = SCREEN_H - COLLAPSED_H;
-  const expandedOffset = SCREEN_H - EXPANDED_H;
   const translateY = useRef(new Animated.Value(initialOffset)).current;
   const lastTranslateY = useRef(initialOffset);
   const [isExpanded, setIsExpanded] = useState(false);
+  const isDragging = useRef(false);
 
   const springTo = useCallback(
     (toValue: number, expanded: boolean) => {
@@ -99,32 +101,41 @@ function useCustomBottomSheet() {
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 5,
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, { dx, dy }) => {
+        const isVertical = Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 4;
+        if (isVertical) isDragging.current = true;
+        return isVertical;
+      },
       onPanResponderGrant: () => {
+        isDragging.current = false;
         translateY.stopAnimation((val) => {
           lastTranslateY.current = val;
           translateY.setOffset(val);
           translateY.setValue(0);
         });
       },
-      onPanResponderMove: (_, gs) => {
+      onPanResponderMove: (_, { dy }) => {
         const clamped = Math.min(
           SCREEN_H - COLLAPSED_H + 40,
-          Math.max(SCREEN_H - EXPANDED_H, gs.dy),
+          Math.max(SCREEN_H - EXPANDED_H, lastTranslateY.current + dy),
         );
-        translateY.setValue(clamped);
+        translateY.setValue(clamped - lastTranslateY.current);
       },
-      onPanResponderRelease: (_, gs) => {
+      onPanResponderRelease: (_, { dy, vy }) => {
+        isDragging.current = false;
         translateY.flattenOffset();
-        const { dy, vy } = gs;
-        if (vy > VELOCITY_THRESHOLD) springTo(SCREEN_H - COLLAPSED_H, false);
-        else if (vy < -VELOCITY_THRESHOLD)
+        const current = lastTranslateY.current + dy;
+
+        if (vy > VELOCITY_THRESHOLD) {
+          springTo(SCREEN_H - COLLAPSED_H, false);
+        } else if (vy < -VELOCITY_THRESHOLD) {
           springTo(SCREEN_H - EXPANDED_H, true);
-        else if (dy > SNAP_THRESHOLD) springTo(SCREEN_H - COLLAPSED_H, false);
-        else if (dy < -SNAP_THRESHOLD) springTo(SCREEN_H - EXPANDED_H, true);
-        else {
-          const current = lastTranslateY.current + dy;
+        } else if (dy > SNAP_THRESHOLD) {
+          springTo(SCREEN_H - COLLAPSED_H, false);
+        } else if (dy < -SNAP_THRESHOLD) {
+          springTo(SCREEN_H - EXPANDED_H, true);
+        } else {
           const toCollapsed = Math.abs(current - (SCREEN_H - COLLAPSED_H));
           const toExpanded = Math.abs(current - (SCREEN_H - EXPANDED_H));
           springTo(
@@ -134,6 +145,14 @@ function useCustomBottomSheet() {
             toCollapsed >= toExpanded,
           );
         }
+      },
+      onPanResponderTerminate: () => {
+        isDragging.current = false;
+        translateY.flattenOffset();
+        springTo(
+          lastTranslateY.current,
+          lastTranslateY.current !== SCREEN_H - COLLAPSED_H,
+        );
       },
     }),
   ).current;
@@ -156,9 +175,16 @@ export default function RiderArrivingScreen() {
   const pickupCoord = (route.params as any)?.pickupCoords ?? DEFAULT_PICKUP;
   const dropoffCoord = (route.params as any)?.dropoffCoords ?? DEFAULT_DROPOFF;
 
+  const orderId = (route.params as any)?.orderId as string | undefined;
+
   const [eta, setEta] = useState(5);
   const { translateY, panResponder } = useCustomBottomSheet();
   const progressAnim = useRef(new Animated.Value(0)).current;
+
+  const [riderCoord, setRiderCoord] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
   // Fetch real route
   const { coords: routeCoords, etaMinutes } = useRoutePolyline({
@@ -166,13 +192,6 @@ export default function RiderArrivingScreen() {
     destination: dropoffCoord,
     mode: vehicleType === "e-motorcycle" ? "TWO_WHEELER" : "BICYCLE",
   });
-
-  // Animated rider progress (0 → 1 over the ETA duration)
-  const riderProgressRef = useRef(0);
-  const [riderCoord, setRiderCoord] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
 
   // Set real ETA when route loads
   useEffect(() => {
@@ -197,13 +216,17 @@ export default function RiderArrivingScreen() {
     const startTime = Date.now();
 
     const interval = setInterval(() => {
+      // Stop simulating once real GPS takes over
+      if (riderCoord) {
+        clearInterval(interval);
+        return;
+      }
       const elapsed = Date.now() - startTime;
       const progress = Math.min(1, elapsed / totalMs);
-      riderProgressRef.current = progress;
       const pos = interpolateOnRoute(routeCoords, progress);
       if (pos) setRiderCoord(pos);
       if (progress >= 1) clearInterval(interval);
-    }, 1000);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [routeCoords, eta]);
@@ -235,6 +258,29 @@ export default function RiderArrivingScreen() {
   useEffect(() => {
     if (eta === 0) navigation.replace("ActiveDelivery", route.params);
   }, [eta]);
+
+  useOrderSocket({
+    orderId: orderId ?? "",
+    onRiderLocation: (payload) => {
+      const coord = { latitude: payload.lat, longitude: payload.lng };
+      setRiderCoord(coord);
+    },
+    onStatusChanged: (payload:any) => {
+  if (payload.status === "collected") {
+    navigation.replace("ActiveDelivery", {
+      ...route.params,
+      orderId,
+      // ✅ Explicitly pull from payload if available, fallback to params
+      riderName: payload.riderName ?? route.params?.riderName,
+      riderPlate: payload.riderPlate ?? route.params?.riderPlate,
+      riderRating: payload.riderRating ?? route.params?.riderRating,
+      pickupCoords: route.params?.pickupCoords,
+      dropoffCoords: route.params?.dropoffCoords,
+    });
+  }
+},
+
+  });
 
   const displayEta = etaMinutes ?? 33;
 
@@ -309,9 +355,13 @@ export default function RiderArrivingScreen() {
             tracksViewChanges={true}
           >
             <View style={styles.riderMarker}>
-              <Text style={{ fontSize: 22 }}>
-                {vehicleType === "e-motorcycle" ? "🛵" : "🚲"}
-              </Text>
+              <View style={styles.riderMarker}>
+                {vehicleType === "e-motorcycle" ? (
+                  <MotorcycleSvg width={22} height={22} />
+                ) : (
+                  <BicycleSvg width={22} height={22} />
+                )}
+              </View>
             </View>
           </Marker>
         )}
@@ -334,8 +384,10 @@ export default function RiderArrivingScreen() {
       {/* Bottom Sheet */}
       <Animated.View
         style={[styles.bottomSheet, { transform: [{ translateY }] }]}
+        {...panResponder.panHandlers}
       >
-        <View style={styles.handleArea} {...panResponder.panHandlers}>
+        {/* Handle — decorative only */}
+        <View style={styles.handleArea}>
           <View style={styles.handleBar} />
         </View>
 
@@ -347,7 +399,11 @@ export default function RiderArrivingScreen() {
             <View style={styles.avatarContainer}>
               <View style={styles.avatarPlaceholder}>
                 <Image
-                  source={require("../../assets/images/rider_john.png")}
+                  source={
+                    (route.params as any)?.riderPhoto
+                      ? { uri: (route.params as any).riderPhoto }
+                      : require("../../assets/images/rider_john.png")
+                  }
                   style={styles.avatar}
                 />
               </View>
@@ -640,3 +696,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 });
+
+
+
+

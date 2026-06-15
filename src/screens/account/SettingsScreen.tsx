@@ -35,22 +35,26 @@ const Colors = {
 };
 
 const ABOUT_ITEMS = [
-  { label: "Terms & Conditions" },
-  { label: "Privacy Policy" },
-  { label: "Licences" },
+  { label: "Terms & Conditions", screen: "Terms" },
+  { label: "Privacy Policy", screen: "PrivacyPolicy" },
+  // { label: "Licences", screen: "Licenses" },
 ];
 
 export default function SettingsScreen() {
-  const navigation    = useNavigation<any>();
-  const fadeIn        = useRef(new Animated.Value(0)).current;
+  const navigation = useNavigation<any>();
+  const fadeIn = useRef(new Animated.Value(0)).current;
   const logoutMutation = useLogout();
-  const clearAuth      = useAuthStore((s: any) => s.clearAuth);
+  const clearAuth = useAuthStore((s: any) => s.clearAuth);
 
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
   useEffect(() => {
-    Animated.timing(fadeIn, { toValue: 1, duration: 350, useNativeDriver: true }).start();
+    Animated.timing(fadeIn, {
+      toValue: 1,
+      duration: 350,
+      useNativeDriver: true,
+    }).start();
   }, []);
 
   const handleLogoutConfirm = () => {
@@ -96,8 +100,12 @@ export default function SettingsScreen() {
           {ABOUT_ITEMS.map((item, index) => (
             <TouchableOpacity
               key={item.label}
-              style={[styles.row, index < ABOUT_ITEMS.length - 1 && styles.rowBorder]}
+              style={[
+                styles.row,
+                index < ABOUT_ITEMS.length - 1 && styles.rowBorder,
+              ]}
               activeOpacity={0.7}
+              onPress={() => navigation.navigate(item.screen)} // ← add this line
             >
               <Text style={[styles.rowLabel, { flex: 1 }]}>{item.label}</Text>
               <ChevronRightSvg width={8} height={14} />
@@ -165,7 +173,12 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === "ios" ? 56 : 40,
     paddingBottom: 14,
   },
-  backBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
+  backBtn: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   headerTitle: {
     flex: 1,
     textAlign: "center",

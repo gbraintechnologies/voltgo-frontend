@@ -9,7 +9,12 @@ import {
   Image,
   Platform,
 } from "react-native";
-import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
+import {
+  useNavigation,
+  useRoute,
+  RouteProp,
+  CommonActions,
+} from "@react-navigation/native";
 import { DeliveryStackParamList } from "../../navigation/types";
 import Svg, { Path, Circle } from "react-native-svg";
 
@@ -23,6 +28,8 @@ const Colors = {
   inputBg: "#F2F4F7",
   successBg: "#E8F5ED",
   successText: "#1A7A3C",
+  scheduledBg: "#E8F4FF",
+  scheduledText: "#0B3C5D",
 };
 
 type RouteParams = RouteProp<DeliveryStackParamList, "DeliveryComplete">;
@@ -36,6 +43,7 @@ export default function DeliveryCompleteScreen() {
     itemType = "Parcel",
     isScheduled,
     scheduledTime,
+    scheduledDate,
   } = route.params ?? {};
   const fadeIn = useRef(new Animated.Value(0)).current;
   const scaleIn = useRef(new Animated.Value(0.7)).current;
@@ -57,6 +65,9 @@ export default function DeliveryCompleteScreen() {
     ]).start();
   }, []);
 
+  const iconColor = isScheduled ? Colors.scheduledText : Colors.successText;
+  const circleBg = isScheduled ? Colors.scheduledBg : Colors.successBg;
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={Colors.white} />
@@ -67,35 +78,84 @@ export default function DeliveryCompleteScreen() {
           { opacity: fadeIn, transform: [{ scale: scaleIn }] },
         ]}
       >
-        {/* Success icon */}
-        <View style={styles.successCircle}>
-          <Svg width={44} height={44} viewBox="0 0 24 24" fill="none">
-            <Path
-              d="M20 6L9 17L4 12"
-              stroke={Colors.successText}
-              strokeWidth={2.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
+        {/* Icon */}
+        <View style={[styles.successCircle, { backgroundColor: circleBg }]}>
+          {isScheduled ? (
+            <Svg width={44} height={44} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M8 2V5"
+                stroke={iconColor}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+              />
+              <Path
+                d="M16 2V5"
+                stroke={iconColor}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+              />
+              <Path
+                d="M3.5 9H20.5"
+                stroke={iconColor}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+              />
+              <Path
+                d="M4 4.5H20C20.55 4.5 21 4.95 21 5.5V19.5C21 20.05 20.55 20.5 20 20.5H4C3.45 20.5 3 20.05 3 19.5V5.5C3 4.95 3.45 4.5 4 4.5Z"
+                stroke={iconColor}
+                strokeWidth={2.5}
+                strokeLinejoin="round"
+              />
+              <Path
+                d="M8 13L10.5 15.5L16 10"
+                stroke={iconColor}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          ) : (
+            <Svg width={44} height={44} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M20 6L9 17L4 12"
+                stroke={iconColor}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          )}
         </View>
 
-        <Text style={styles.heading}>Delivered!</Text>
-        <Text style={styles.subheading}>
-          Your {itemType.toLowerCase()} has been{"\n"}successfully delivered.
-        </Text>
-
-        {!isScheduled && (
+        {isScheduled ? (
           <>
+            <Text style={styles.heading}>Delivery Reserved!</Text>
+            <Text style={styles.subheading}>
+              Your {itemType.toLowerCase()} pickup has been{"\n"}reserved
+              {scheduledDate ? ` for ${scheduledDate}` : ""}
+              {scheduledTime ? `, ${scheduledTime}` : ""}
+              {!scheduledDate && !scheduledTime ? "." : "."}
+            </Text>
+
+            <View style={styles.reservedInfoCard}>
+              <Text style={styles.reservedInfoTitle}>What happens next?</Text>
+              <Text style={styles.reservedInfoText}>
+                We'll find a rider close to your pick-up time and notify you
+                once they're assigned. You can view or cancel this delivery
+                anytime from the Scheduled tab in Activities.
+              </Text>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.heading}>Delivered!</Text>
+            <Text style={styles.subheading}>
+              Your {itemType.toLowerCase()} has been{"\n"}successfully
+              delivered.
+            </Text>
+
             {/* Rider summary */}
             <View style={styles.riderCard}>
-              {/*
-            Replace with:
-          */}
-              {/* <Image
-            source={{ uri: 'https://via.placeholder.com/52x52/0B1F3A/FFFFFF.png?text=J' }}
-            style={styles.avatar}
-          /> */}
               <Image
                 source={require("../../assets/images/rider_john.png")}
                 style={styles.avatar}
@@ -148,7 +208,14 @@ export default function DeliveryCompleteScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.newDeliveryBtn}
-          onPress={() => navigation.navigate("DeliveryFlow")}
+          onPress={() =>
+            navigation.dispatch(
+              CommonActions.reset({
+                index: 0,
+                routes: [{ name: "ChooseRoute" }],
+              }),
+            )
+          }
           activeOpacity={0.8}
         >
           <Text style={styles.newDeliveryText}>Send another parcel</Text>
@@ -170,7 +237,6 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: Colors.successBg,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 24,
@@ -181,6 +247,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     letterSpacing: 0.3,
     marginBottom: 10,
+    textAlign: "center",
   },
   subheading: {
     fontFamily: "Poppins-Regular",
@@ -189,6 +256,24 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
     marginBottom: 32,
+  },
+  reservedInfoCard: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 16,
+    padding: 18,
+    width: "100%",
+  },
+  reservedInfoTitle: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 14,
+    color: Colors.textPrimary,
+    marginBottom: 8,
+  },
+  reservedInfoText: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 13,
+    color: Colors.textMuted,
+    lineHeight: 20,
   },
   riderCard: {
     flexDirection: "row",

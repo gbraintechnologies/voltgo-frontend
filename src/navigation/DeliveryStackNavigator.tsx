@@ -18,6 +18,7 @@ import ActiveDeliveryScreen from "../screens/tracking/ActiveDeliveryScreen";
 import DeliveryCompleteScreen from "@/screens/delivery/DeliveryCompleteScreen";
 import AddMobileMoneyScreen from "@/screens/payment/AddMobileMoneyScreen";
 import AddCardScreen from "@/screens/payment/AddCardScreen";
+import TermsConditionsModal from "@/screens/delivery/TermsCondittionModal";
 
 const Stack = createNativeStackNavigator<DeliveryStackParamList>();
 
@@ -38,13 +39,20 @@ export default function DeliveryStackNavigator() {
       <Stack.Screen
         name="SchedulePickup"
         component={SchedulePickupScreen}
-        options={{ animation: "slide_from_bottom" }} 
+        options={{ animation: "slide_from_bottom" }}
       />
 
       <Stack.Screen name="DeliveryDetails" component={DeliveryDetailsScreen} />
       <Stack.Screen name="SelectVehicle" component={SelectVehicleScreen} />
       <Stack.Screen name="ReviewDelivery" component={ReviewDeliveryScreen} />
-
+      <Stack.Screen
+        name="TermsCondition"
+        component={TermsConditionsModal}
+        options={{
+          presentation: "modal",
+          animation: "slide_from_bottom",
+        }}
+      />
       {/* Modal payment sheet */}
       <Stack.Screen
         name="PayWith"
@@ -77,10 +85,12 @@ export default function DeliveryStackNavigator() {
       <Stack.Screen
         name="RiderFound"
         component={RiderFoundScreen}
-        options={{ animation: "slide_from_bottom" }} 
+        options={{ animation: "slide_from_bottom" }}
       />
       <Stack.Screen name="RiderArriving" component={RiderArrivingScreen} />
       <Stack.Screen name="ActiveDelivery" component={ActiveDeliveryScreen} />
     </Stack.Navigator>
   );
 }
+
+

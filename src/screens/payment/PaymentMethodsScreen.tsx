@@ -55,6 +55,7 @@ function ProviderLogo({ method }: { method: PaymentMethod }) {
       />
     );
   }
+  // Fix: match your actual PaymentMethod provider union values
   return (
     <View
       style={{
@@ -73,7 +74,7 @@ function ProviderLogo({ method }: { method: PaymentMethod }) {
           fontSize: 11,
         }}
       >
-        {method.provider === "telecel" ? "Tel" : "AT"}
+        {method.provider === "airteltigo" ? "AT" : "Tel"}
       </Text>
     </View>
   );
@@ -170,12 +171,15 @@ export default function PaymentMethodsScreen() {
                 Add a mobile money account or card to pay for deliveries
                 quickly.
               </Text>
+              {/* ── Navy CTA only shown in empty state ── */}
               <TouchableOpacity
                 style={styles.emptyAddBtn}
                 onPress={() => navigation.navigate("AddMobileMoney")}
                 activeOpacity={0.85}
               >
-                <Text style={styles.emptyAddBtnText}>+ Add Mobile Money</Text>
+                <Text style={styles.emptyAddBtnText}>
+                  + Add a Payment Method
+                </Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -227,6 +231,7 @@ export default function PaymentMethodsScreen() {
             ))
           )}
 
+          {/* ── These always show, whether empty or not ── */}
           <TouchableOpacity
             style={styles.addRow}
             onPress={() => navigation.navigate("AddMobileMoney")}

@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api } from "./client";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export interface BundleProduct {
@@ -19,7 +19,7 @@ export interface ActiveBundle {
   product: BundleProduct;
 }
 
-export type BundleStatus = 'active' | 'expired' | 'exhausted' | 'cancelled';
+export type BundleStatus = "active" | "expired" | "exhausted" | "cancelled";
 
 export interface BundleHistoryItem {
   id: string;
@@ -36,26 +36,48 @@ export interface BundleHistoryItem {
 export const bundlesApi = {
   /** Browse available bundle products */
   getProducts: () =>
-    api.get<{ status: number; message: string; data: BundleProduct[] }>('/bundles/products', false),
+    api.get<{ status: number; message: string; data: BundleProduct[] }>(
+      "/bundles/products",
+      false,
+    ),
 
   /** Purchase a bundle */
-  purchase: (body: { bundle_product_id: string; auto_renew: boolean }) =>
-    api.post<{ success: boolean; message: string; data: ActiveBundle }>('/bundles/purchase', body, true),
+  purchase: (body: {
+    bundle_product_id: string;
+    payment_method_id?: string;
+    auto_renew: boolean;
+  }) =>
+    api.post<{
+      status: number;
+      message: string;
+      data: {
+        payment: any;
+        checkout: { authorization_url: string; reference: string };
+        bundle_product: any;
+      };
+    }>("/bundles/purchase", body, true),
 
   /** Get my bundle history */
   getMyBundles: (status?: BundleStatus) => {
-    const qs = status ? `?status=${status}` : '';
-    return api.get<{ success: boolean; data: BundleHistoryItem[] }>(`/bundles/my${qs}`, true);
+    const qs = status ? `?status=${status}` : "";
+    return api.get<{ success: boolean; data: BundleHistoryItem[] }>(
+      `/bundles/my${qs}`,
+      true,
+    );
   },
 
   /** Get active bundle */
   getActiveBundle: () =>
-    api.get<{ status: number; message: string; data: ActiveBundle }>('/bundles/my/active', true),
+    api.get<{ status: number; message: string; data: ActiveBundle }>(
+      "/bundles/my/active",
+      true,
+    ),
 
   /** Cancel a bundle */
   cancelBundle: (id: string) =>
-    api.post<{ success: boolean; message: string }>(`/bundles/my/${id}/cancel`, {}, true),
+    api.post<{ success: boolean; message: string }>(
+      `/bundles/my/${id}/cancel`,
+      {},
+      true,
+    ),
 };
-
-
-

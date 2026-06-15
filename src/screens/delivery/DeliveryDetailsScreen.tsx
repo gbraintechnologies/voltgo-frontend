@@ -228,7 +228,7 @@ export default function DeliveryDetailsScreen() {
             <Text style={styles.readOnlyText} numberOfLines={1}>
               {dropoff}
             </Text>
-            <MapSvg width={30} height={26} />
+            {/* <MapSvg width={30} height={26} /> */}
           </View>
 
           {/* ── Package Details Section ── */}
@@ -571,3 +571,5 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 });
+
+

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -9,13 +9,24 @@ import {
   StatusBar,
   Image,
   Platform,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
-import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
+import {
+  useNavigation,
+  useRoute,
+  RouteProp,
+  useFocusEffect,
+} from "@react-navigation/native";
 import { DeliveryStackParamList } from "../../navigation/types";
 import CloseXSvg from "../../assets/icons/close_x.svg";
 import PinLocationSvg from "../../assets/icons/pin_location.svg";
 import BundleCreditsSvg from "../../assets/icons/bundle_credits.svg";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useBookDelivery, usePaymentOptions } from "@/hooks/useApi";
+import TermsConditionsModal from "./TermsCondittionModal";
+import ChevronRightSvg from "../../assets/icons/chevron_right.svg";
+import WalletSvg from "../../assets/icons/topup_icon.svg";
 
 const Colors = {
   white: "#FFFFFF",
@@ -31,6 +42,52 @@ const Colors = {
 
 type RouteParams = RouteProp<DeliveryStackParamList, "ReviewDelivery">;
 
+// Add this helper above the component
+function buildScheduledAt(
+  scheduledDate?: string,
+  scheduledTime?: string,
+): string | undefined {
+  if (!scheduledDate || !scheduledTime) return undefined;
+
+  // scheduledTime format: "01:00 - 01:30" — take the start time
+  const startTime = scheduledTime.split(" - ")[0].trim(); // "01:00"
+  const [hours, minutes] = startTime.split(":").map(Number);
+
+  // scheduledDate format: "Saturday, 24 May" — parse it
+  const currentYear = new Date().getFullYear();
+  const dateStr = scheduledDate.replace(/^[^,]+,\s*/, ""); // "24 May"
+  const parsed = new Date(`${dateStr} ${currentYear}`);
+
+  if (isNaN(parsed.getTime())) return undefined;
+
+  parsed.setHours(hours, minutes, 0, 0);
+  return parsed.toISOString();
+}
+
+function PaymentIcon({ method }: { method: { id: string; method: string; label: string } | null }) {
+  if (!method) {
+    return <BundleCreditsSvg width={50} height={46} />;
+  }
+
+  if (method.id === "bundle_credit" || method.method === "bundle") {
+    return <BundleCreditsSvg width={50} height={46} />;
+  }
+
+  // MTN MoMo or any momo type
+  if (method.method === "mtn" || method.method === "vodafone" || method.method === "airteltigo" || method.label?.toLowerCase().includes("momo") || method.label?.toLowerCase().includes("mtn")) {
+    return (
+      <Image
+        source={require("../../assets/images/mtn_logo.png")}
+        style={{ width: 32, height: 32 }}
+        resizeMode="contain"
+      />
+    );
+  }
+
+    // Generic fallback
+  return <WalletSvg width={24} height={24} />;
+}
+
 export default function ReviewDeliveryScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
@@ -45,10 +102,58 @@ export default function ReviewDeliveryScreen() {
     paymentMethod = "Bundle Credits",
   } = route.params ?? {};
 
+  const { data: paymentOptionsRes, isLoading: isLoadingPayments } =
+    usePaymentOptions();
+
+  const paymentOptions = paymentOptionsRes?.data ?? [];
+
+  const [selectedPayment, setSelectedPayment] = useState<{
+    id: string;
+    label: string;
+    method: string;
+    payment_method_id?: string;
+  } | null>(null);
+
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(18)).current;
+  const [termsVisible, setTermsVisible] = useState(false);
 
   const { isScheduled } = route.params ?? {};
+
+  const { mutateAsync: bookDelivery, isPending: isBooking } = useBookDelivery();
+
+  useEffect(() => {
+    if (selectedPayment) return; // already set (e.g. came back from PayWith)
+
+    const rawData = paymentOptionsRes?.data as any;
+    if (!rawData) return;
+
+    // Build the same options list PayWith uses
+    const bundleCredit = rawData.bundle_credit;
+    const hasCredits = (bundleCredit?.credits_remaining ?? 0) > 0;
+
+    if (bundleCredit && hasCredits) {
+      setSelectedPayment({
+        id: "bundle_credit",
+        label: "Bundle Credit",
+        method: "bundle",
+        payment_method_id: undefined,
+      });
+      return;
+    }
+
+    // Fall back to first saved payment method
+    const methods: any[] = rawData.payment_methods ?? [];
+    if (methods.length > 0) {
+      const first = methods[0];
+      setSelectedPayment({
+        id: first.id,
+        label: first.account_name ?? "Mobile Money",
+        method: first.provider ?? first.type,
+        payment_method_id: first.id,
+      });
+    }
+  }, [paymentOptionsRes, selectedPayment]);
 
   useEffect(() => {
     Animated.parallel([
@@ -66,17 +171,76 @@ export default function ReviewDeliveryScreen() {
     ]).start();
   }, []);
 
-const handleConfirm = () => {
-  if (isScheduled) {
-    // Show scheduled success
-    navigation.navigate("DeliveryComplete", { 
-      ...route.params, 
-      isScheduled: true 
-    });
-  } else {
-    navigation.navigate("RiderMatching", route.params);
-  }
-};
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log("ReviewDelivery focused, params:", route.params);
+      if (route.params?.selectedPaymentMethod) {
+        console.log(
+          "Setting selectedPayment:",
+          route.params.selectedPaymentMethod,
+        );
+        setSelectedPayment(route.params.selectedPaymentMethod);
+      }
+    }, [route.params?.selectedPaymentMethod]),
+  );
+
+  const handleConfirm = async () => {
+    if (!selectedPayment) {
+      Alert.alert(
+        "Payment required",
+        "Please select a payment method to continue.",
+      );
+      return;
+    }
+
+    console.log("selectedPayment state:", JSON.stringify(selectedPayment));
+
+    try {
+      const res = await bookDelivery({
+        pickup_address: route.params?.pickup ?? "",
+        pickup_lat: route.params?.pickupCoords?.latitude ?? 0,
+        pickup_lng: route.params?.pickupCoords?.longitude ?? 0,
+        dropoff_address: route.params?.dropoff ?? "",
+        dropoff_lat: route.params?.dropoffCoords?.latitude ?? 0,
+        dropoff_lng: route.params?.dropoffCoords?.longitude ?? 0,
+        item_description: route.params?.itemType ?? "",
+        vehicle_type: (route.params?.vehicleType === "e-motorcycle"
+          ? "motorcycle"
+          : "bicycle") as any,
+        special_instructions: route.params?.specialInstructions,
+        payment_method:
+          selectedPayment.method === "bundle_credit"
+            ? "bundle"
+            : selectedPayment.method,
+        payment_method_id: selectedPayment.payment_method_id, // ← add this
+        price_ghs: route.params?.price ?? 0,
+        ...(isScheduled
+          ? {
+              scheduled_at: buildScheduledAt(
+                route.params?.scheduledDate,
+                route.params?.scheduledTime,
+              ),
+            }
+          : {}),
+      });
+
+      const orderId = (res as any)?.data?.id ?? (res as any)?.data?.data?.id;
+
+      if (isScheduled) {
+        navigation.navigate("DeliveryComplete", {
+          ...route.params,
+          isScheduled: true,
+        });
+      } else {
+        navigation.navigate("RiderMatching", { ...route.params, orderId });
+      }
+    } catch (err: any) {
+      Alert.alert(
+        "Booking failed",
+        err?.message ?? "Could not place order. Please try again.",
+      );
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -103,90 +267,100 @@ const handleConfirm = () => {
         {/* ── Route ── */}
         <SectionLabel label="Route" />
 
-        {/* Sender row */}
-        <View style={styles.routeRow}>
-          <View style={styles.routeIconWrap}>
-            {/*
-              Replace with:
-              <Image source={require('../../assets/images/parcel_box.png')} style={styles.routeIconImg} />
-            */}
-            {/* <Image
-              source={{
-                uri: "https://via.placeholder.com/40x40/F2F4F7/1A1A2E.png?text=📦",
-              }}
+        {/* Route rows */}
+        <View style={{ flexDirection: "row", gap: 14 }}>
+          {/* Left icon column: box → dashed line → pin */}
+          <View style={{ width: 40, alignItems: "center" }}>
+            <Image
+              source={require("../../assets/images/parcel_box.png")}
               style={styles.routeIconImg}
-            /> */}
-                          <Image source={require('../../assets/images/parcel_box.png')} style={styles.routeIconImg} />
-
-          </View>
-          <View style={styles.routeTextWrap}>
-            <Text style={styles.routePrimary}>{senderName}</Text>
-            <Text style={styles.routeSecondary}>{pickup}</Text>
-            <Text style={styles.routeSecondary}>{itemType}</Text>
-          </View>
-        </View>
-
-        {/* Dashed connector */}
-        <View style={styles.dashedLineWrap}>
-          <DashedLine />
-        </View>
-
-        {/* Recipient row */}
-        <View style={styles.routeRow}>
-          <View style={styles.routeIconWrap}>
+              resizeMode="contain"
+            />
+            <DashedLine />
             <PinLocationSvg width={20} height={24} />
           </View>
-          <View style={styles.routeTextWrap}>
-            <Text style={styles.routePrimary}>Recipient</Text>
-            <Text style={styles.routeSecondary}>{dropoff}</Text>
+
+          {/* Right text column */}
+          <View style={{ flex: 1, justifyContent: "space-between" }}>
+            {/* Pickup — aligned with box icon */}
+            <View style={{ paddingTop: 2, height: 40 }}>
+              <Text style={styles.routePrimary}>{senderName}</Text>
+              <Text style={styles.routeSecondary}>{pickup}</Text>
+              <Text style={styles.routeSecondary}>{itemType}</Text>
+            </View>
+
+            {/* Spacer matches DashedLine height */}
+            <View style={{ height: 44 }} />
+
+            {/* Dropoff — aligned with pin icon */}
+            <View style={{ paddingBottom: 2 }}>
+              <Text style={styles.routePrimary}>Recipient</Text>
+              <Text style={styles.routeSecondary}>{dropoff}</Text>
+            </View>
           </View>
         </View>
 
         {/* ── Pick-up Time ── */}
-        <View style={styles.sectionGap} />
-        <SectionLabel label="Pick - up time" />
-
-        <View style={styles.pickupRow}>
-          {/*
-            Replace with:
-          */}
-          {/* <Image
-            source={{
-              uri: "https://via.placeholder.com/60x44/F2F4F7/1A1A2E.png?text=🚲",
-            }}
-            style={styles.pickupVehicleImg}
-          /> */}
-          <Image
-            source={require("../../assets/images/bicycle_vehicle.png")}
-            style={styles.pickupVehicleImg}
-          />
-
-          <View>
-            <Text style={styles.pickupLabel}>Scheduled pick - up</Text>
-            <Text style={styles.pickupTime}>{scheduledTime}</Text>
-            <Text style={styles.pickupDate}>{scheduledDate}</Text>
-          </View>
-        </View>
+        {isScheduled && (
+          <>
+            <View style={styles.sectionGap} />
+            <SectionLabel label="Pick - up time" />
+            <View style={styles.pickupRow}>
+              <Image
+                source={require("../../assets/images/bicycle_vehicle.png")}
+                style={styles.pickupVehicleImg}
+              />
+              <View>
+                <Text style={styles.pickupLabel}>Scheduled pick - up</Text>
+                <Text style={styles.pickupTime}>{scheduledTime}</Text>
+                <Text style={styles.pickupDate}>{scheduledDate}</Text>
+              </View>
+            </View>
+          </>
+        )}
 
         {/* ── Payment Mode ── */}
         <View style={styles.sectionGap} />
         <SectionLabel label="Payment mode" />
 
-        <View style={styles.paymentCard}>
+        <TouchableOpacity
+          style={styles.paymentCard}
+          onPress={() =>
+            navigation.navigate("PayWith", {
+              ...route.params,
+              returnTo: "ReviewDelivery",
+            })
+          }
+          activeOpacity={0.75}
+        >
           <View style={styles.paymentIconWrap}>
-            <BundleCreditsSvg width={50} height={46} />
+            <PaymentIcon method={selectedPayment} />
           </View>
-          <Text style={styles.paymentLabel}>{paymentMethod}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.paymentLabel}>
+              {selectedPayment?.label ??
+                paymentMethod ??
+                "Select payment method"}
+            </Text>
+            <Text style={styles.paymentChangeHint}>Tap to change</Text>
+          </View>
           <Text style={styles.paymentPrice}>GHS {price}.00</Text>
-        </View>
+          <ChevronRightSvg width={8} height={14} />
+        </TouchableOpacity>
 
         <View style={{ height: 28 }} />
 
-        <TouchableOpacity>
-          <Text style={styles.termsLink}>
-            Scheduled delivery{"\n"}terms and conditions
-          </Text>
-        </TouchableOpacity>
+        {/* Terms & Conditions — only relevant for scheduled deliveries */}
+        {isScheduled && (
+          <TouchableOpacity
+            onPress={() => navigation.navigate("TermsCondition")}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.termsLink}>
+              Scheduled delivery{"\n"}terms and conditions
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <View style={{ height: 100 }} />
       </Animated.ScrollView>
@@ -194,11 +368,23 @@ const handleConfirm = () => {
       {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={styles.confirmBtn}
+          style={[
+            styles.confirmBtn,
+            (!selectedPayment || isBooking || isLoadingPayments) && {
+              opacity: 0.5,
+            },
+          ]}
           onPress={handleConfirm}
+          disabled={!selectedPayment || isBooking || isLoadingPayments}
           activeOpacity={0.85}
         >
-          <Text style={styles.confirmBtnText}>Confirm delivery</Text>
+          {isBooking ? (
+            <ActivityIndicator color={Colors.textPrimary} />
+          ) : (
+            <Text style={styles.confirmBtnText}>
+              {isScheduled ? "Reserve Courier" : "Confirm Booking"}
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -321,8 +507,8 @@ const styles = StyleSheet.create({
   },
 
   dashedLineWrap: {
-    paddingLeft: 20,
-    marginVertical: -4,
+    // paddingLeft: 20,
+    // marginVertical: -4,
   },
 
   sectionGap: { height: 24 },
@@ -359,7 +545,6 @@ const styles = StyleSheet.create({
   paymentCard: {
     flexDirection: "row",
     alignItems: "center",
-    // backgroundColor: Colors.bundleIconBg,
     borderRadius: 14,
     padding: 14,
     gap: 12,
@@ -368,9 +553,14 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 10,
-    // backgroundColor: Colors.bundleIcon,
     alignItems: "center",
     justifyContent: "center",
+  },
+  paymentChangeHint: {
+    fontFamily: "Poppins-Regular",
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
   },
   paymentLabel: {
     flex: 1,
@@ -387,7 +577,7 @@ const styles = StyleSheet.create({
 
   termsLink: {
     fontFamily: "Poppins-ExtraBold",
-    fontWeight: 500,
+    fontWeight: "500",
     fontSize: 14,
     color: Colors.navy,
     lineHeight: 22,
@@ -413,5 +603,3 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 });
-
-

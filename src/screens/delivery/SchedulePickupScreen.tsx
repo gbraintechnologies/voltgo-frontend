@@ -48,9 +48,16 @@ function getDates(showAll: boolean) {
   return showAll ? [...base, ...extra] : [...base, extra[0]];
 }
 
-function getTimeSlots() {
+function getTimeSlots(isToday = false) {
   const slots = [];
+  const now = new Date();
+  // Add a 30-minute buffer so users can't book a slot that starts imminently
+  const cutoffMinutes = now.getHours() * 60 + now.getMinutes() + 30;
+
   for (let h = 1; h <= 23; h++) {
+    const slotStartMinutes = h * 60;
+    if (isToday && slotStartMinutes <= cutoffMinutes) continue;
+
     const start = `${String(h).padStart(2, "0")}:00`;
     const end = `${String(h).padStart(2, "0")}:30`;
     slots.push({ id: String(h), label: `${start} - ${end}` });
@@ -65,7 +72,21 @@ export default function SchedulePickupScreen() {
   const [showAllDates, setShowAllDates] = useState(false);
   const DATES = getDates(showAllDates);
   const [selectedDate, setSelectedDate] = useState("0");
-  const [selectedSlot, setSelectedSlot] = useState(TIME_SLOTS[0].id);
+
+  // Derive whether "Today" is selected and compute available slots
+  const isToday = selectedDate === "0";
+  const TIME_SLOTS = getTimeSlots(isToday);
+
+  // Default to the first available slot
+  const [selectedSlot, setSelectedSlot] = useState(TIME_SLOTS[0]?.id ?? "");
+
+  // Reset selected slot whenever the date changes
+  const handleSelectDate = (id: string) => {
+    setSelectedDate(id);
+    const newIsToday = id === "0";
+    const newSlots = getTimeSlots(newIsToday);
+    setSelectedSlot(newSlots[0]?.id ?? "");
+  };
 
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(20)).current;
@@ -131,7 +152,7 @@ export default function SchedulePickupScreen() {
                   styles.datePill,
                   selectedDate === date.id && styles.datePillSelected,
                 ]}
-                onPress={() => setSelectedDate(date.id)}
+                onPress={() => handleSelectDate(date.id)}
                 activeOpacity={0.75}
               >
                 <Text
@@ -354,5 +375,3 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 });
-
-

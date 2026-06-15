@@ -11,6 +11,9 @@ import AddMobileMoneyScreen from "@/screens/payment/AddMobileMoneyScreen";
 import AddCardScreen from "@/screens/payment/AddCardScreen";
 import PayWithScreen from "@/screens/payment/PayWithScreen";
 import PaymentMethodsScreen from "@/screens/payment/PaymentMethodsScreen";
+import PrivacyPolicyScreen from "../screens/account/PrivacyPolicyScreen";
+import LicensesScreen from "../screens/account/LicensesScreen";
+import TermsScreen from "@/screens/account/TermsScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -26,12 +29,12 @@ export default function AccountStackNavigator() {
       <Stack.Screen name="Security" component={SecurityScreen} />
       <Stack.Screen name="Support" component={SupportScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="Terms" component={TermsScreen} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+      <Stack.Screen name="Licenses" component={LicensesScreen} />
       <Stack.Screen name="BundlesCredits" component={BundlesCreditsScreen} />
       <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
-      <Stack.Screen
-        name="AddPaymentMethod"
-        component={AddPaymentMethodScreen}
-      />
+      <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethodScreen} />
       <Stack.Screen name="PayWith" component={PayWithScreen} />
       <Stack.Screen name="AddMobileMoney" component={AddMobileMoneyScreen} />
       <Stack.Screen name="AddCard" component={AddCardScreen} />

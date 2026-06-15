@@ -1,13 +1,21 @@
 import { create } from 'zustand';
 import { tokenStorage } from '../api/client';
 import { CustomerProfile } from '../api/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const ONBOARDING_KEY = 'has_seen_onboarding';
+
+const onboardingStorage = {
+  markSeen: () => AsyncStorage.setItem(ONBOARDING_KEY, 'true'),
+  hasSeen: async () => (await AsyncStorage.getItem(ONBOARDING_KEY)) === 'true',
+};
 
 interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
+  hasSeenOnboarding: boolean;
   customer: CustomerProfile | null;
 
-  // Pending registration (held between register → OTP verify)
   pendingPhone: string | null;
   pendingPassword: string | null;
   pendingFullName: string | null;
@@ -16,6 +24,7 @@ interface AuthState {
   setCustomer: (customer: CustomerProfile) => void;
   logout: () => Promise<void>;
   hydrateFromStorage: () => Promise<void>;
+  setHasSeenOnboarding: () => Promise<void>;
 
   setPendingRegistration: (fullName: string, phone: string, password: string) => void;
   clearPendingRegistration: () => void;
@@ -24,6 +33,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: true,
+  hasSeenOnboarding: false,
   customer: null,
   pendingPhone: null,
   pendingPassword: null,
@@ -36,21 +46,30 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   setCustomer: (customer) => set({ customer }),
 
+  // ── Does NOT touch hasSeenOnboarding — survives every logout ──
   logout: async () => {
     await tokenStorage.clearTokens();
     set({ isAuthenticated: false, customer: null });
   },
 
+  setHasSeenOnboarding: async () => {
+    await onboardingStorage.markSeen();
+    set({ hasSeenOnboarding: true });
+  },
+
   hydrateFromStorage: async () => {
     try {
-      const token = await tokenStorage.getAccessToken();
+      const [token, seenOnboarding] = await Promise.all([
+        tokenStorage.getAccessToken(),
+        onboardingStorage.hasSeen(),
+      ]);
       if (!token) {
-        set({ isLoading: false, isAuthenticated: false });
+        set({ isLoading: false, isAuthenticated: false, hasSeenOnboarding: seenOnboarding });
         return;
       }
-      set({ isLoading: false, isAuthenticated: true });
+      set({ isLoading: false, isAuthenticated: true, hasSeenOnboarding: seenOnboarding });
     } catch {
-      set({ isLoading: false, isAuthenticated: false });
+      set({ isLoading: false, isAuthenticated: false, hasSeenOnboarding: false });
     }
   },
 
@@ -61,9 +80,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ pendingFullName: null, pendingPhone: null, pendingPassword: null }),
 }));
 
-// ── Global 401 listener ──────────────────────────────────────────────────────
-// When the API client clears tokens after a failed refresh, this watcher
-// detects the token is gone and forces logout so the navigator redirects.
 let _watcherStarted = false;
 export function startSessionWatcher() {
   if (_watcherStarted) return;
@@ -72,16 +88,10 @@ export function startSessionWatcher() {
   setInterval(async () => {
     const state = useAuthStore.getState();
     if (!state.isAuthenticated) return;
-
     const token = await tokenStorage.getAccessToken();
     if (!token) {
-      // Token was cleared by the auto-refresh failure — log out
       state.logout();
     }
-  }, 3000); // check every 3 seconds
+  }, 3000);
 }
-
-
-
-
 

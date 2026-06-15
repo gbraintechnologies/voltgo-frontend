@@ -54,17 +54,15 @@ export const useVerifyPhone = () => {
     onSuccess: (res) => {
       if (res.data) {
         const { token, refreshToken, id, phone } = res.data;
-
         const customer = {
           id,
           phone,
-          fullName: pendingFullName ?? "", // use the name stored during registration
+          fullName: pendingFullName ?? "",
           email: null,
           is_active: true,
           created_at: "",
           updated_at: "",
         };
-
         setAuthenticated(customer, token, refreshToken);
         clearPending();
         qc.setQueryData(QK.me, { success: true, data: customer });
@@ -72,7 +70,6 @@ export const useVerifyPhone = () => {
     },
   });
 };
-
 /** Login mutation */
 export const useLogin = () => {
   const setAuthenticated = useAuthStore((s) => s.setAuthenticated);
@@ -156,11 +153,13 @@ export const useMyOrders = (params?: {
   });
 
 /** Get a single order */
-export const useOrder = (id: string) =>
+export const useOrderPolling = (id: string) =>
   useQuery({
     queryKey: QK.order(id),
     queryFn: () => ordersApi.getOrder(id),
     enabled: !!id,
+    refetchInterval: 5000,
+    staleTime: 0,
   });
 
 /** Cancel an order */
@@ -171,6 +170,17 @@ export const useCancelOrder = () => {
       ordersApi.cancelOrder(id, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QK.orders() });
+    },
+  });
+};
+
+export const useUpdateProfile = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { full_name?: string; email?: string }) =>
+      authApi.updateProfile(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QK.me });
     },
   });
 };
@@ -215,6 +225,18 @@ export const usePurchaseBundle = () => {
   });
 };
 
+export const useVerifyPaystack = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reference: string) => paymentApi.verifyPaystack(reference),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QK.activeBundle });
+      qc.invalidateQueries({ queryKey: QK.myBundles() });
+      qc.invalidateQueries({ queryKey: QK.paymentOptions });
+    },
+  });
+};
+
 /** Cancel a bundle */
 export const useCancelBundle = () => {
   const qc = useQueryClient();
@@ -242,7 +264,16 @@ export const usePaymentMethods = () =>
 export const usePaymentOptions = () =>
   useQuery({
     queryKey: QK.paymentOptions,
-    queryFn: paymentApi.getOptions,
+    queryFn: async () => {
+      try {
+        return await paymentApi.getOptions();
+      } catch {
+        // Treat any error (404, 500, network) as empty options list
+        return { data: [] };
+      }
+    },
+    // Never retry on failure — empty state is handled gracefully in UI
+    retry: false,
   });
 
 /** Add MoMo */
@@ -280,5 +311,7 @@ export const useRemovePayment = () => {
     },
   });
 };
+
+
 
 

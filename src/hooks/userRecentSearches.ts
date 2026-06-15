@@ -78,3 +78,5 @@ export function useRecentSearches(): Result {
   return { recents, addRecent, clearRecents };
 }
 
+
+
