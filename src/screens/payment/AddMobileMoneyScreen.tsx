@@ -55,7 +55,7 @@ const NETWORKS: {
     textColor: "#FFFFFF",
   },
   {
-    id: "airteltigo",
+    id: "airteltigo_money",
     label: "AT",
     display: "AT",         // was "AirtelTigo"
     color: "#0066B3",
@@ -374,3 +374,5 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 });
+
+

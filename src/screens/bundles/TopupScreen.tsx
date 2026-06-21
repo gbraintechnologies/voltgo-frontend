@@ -148,9 +148,9 @@ export default function TopupScreen() {
                     <Text style={styles.planDeliveries}>
                       {plan.credits} Deliveries
                     </Text>
-                    <Text style={styles.planExpiry}>
+                    {/* <Text style={styles.planExpiry}>
                       Expires in {plan.validity_days} days
-                    </Text>
+                    </Text> */}
                   </View>
                   <View style={{ alignItems: "flex-end", gap: 8 }}>
                     {/* formatPrice handles both string and number from API */}
@@ -184,9 +184,9 @@ export default function TopupScreen() {
                 <Text style={styles.planDeliveries}>
                   {displayPlan.credits} Deliveries
                 </Text>
-                <Text style={styles.planExpiry}>
+                {/* <Text style={styles.planExpiry}>
                   Expires in {displayPlan.validity_days} days
-                </Text>
+                </Text> */}
               </View>
               <View style={{ alignItems: "flex-end", gap: 8 }}>
                 <Text style={styles.planPrice}>

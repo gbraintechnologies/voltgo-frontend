@@ -74,7 +74,7 @@ function ProviderLogo({ method }: { method: PaymentMethod }) {
           fontSize: 11,
         }}
       >
-        {method.provider === "airteltigo" ? "AT" : "Tel"}
+        {method.provider === "airteltigo_money" ? "AT" : "Tel"}
       </Text>
     </View>
   );
@@ -140,7 +140,7 @@ export default function PaymentMethodsScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.navigate('Account')}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <ArrowBackSvg width={60} height={58} />
@@ -382,3 +382,5 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
 });
+
+

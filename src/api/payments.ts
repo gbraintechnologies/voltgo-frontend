@@ -2,7 +2,7 @@ import { api } from "./client";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export type PaymentMethodType = "momo" | "card";
-export type MomoProvider = "mtn_momo" | "vodafone_cash" | "airteltigo";
+export type MomoProvider = "mtn_momo" | "vodafone_cash" | "airteltigo_money";
 
 export interface PaymentMethod {
   id: string;

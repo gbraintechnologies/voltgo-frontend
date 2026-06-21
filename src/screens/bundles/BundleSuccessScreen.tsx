@@ -89,7 +89,7 @@ export default function BundleSuccessScreen() {
         <TouchableOpacity
           style={styles.homeBtn}
           // Replace the reset call with:
-onPress={() =>  navigation.navigate('HomeMap')}
+         onPress={() => navigation.navigate("BundlesCredits", { fromFlow: true })}
           activeOpacity={0.85}
         >
           <Text style={styles.homeBtnText}>Back to Home</Text>

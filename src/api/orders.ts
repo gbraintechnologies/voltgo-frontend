@@ -99,6 +99,7 @@ export const ordersApi = {
 
   /** Get a single order */
   getOrder: (id: string) => api.get<OrderResponse>(`/orders/${id}`, true),
+  // getOrder: (id: string) => api.get(`/orders/${id}`),
 
   /** Cancel a pending order */
   cancelOrder: (id: string, cancellation_reason: string) =>
@@ -108,3 +109,5 @@ export const ordersApi = {
       true,
     ),
 };
+
+

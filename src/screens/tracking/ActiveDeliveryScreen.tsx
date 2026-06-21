@@ -1,5 +1,5 @@
 /**
- * ActiveDeliveryScreen.tsx
+ * Customer ActiveDeliveryScreen.tsx
  * ─────────────────────────────────────────────────────────
  * Real MapView + Routes API polyline + live rider marker
  * animated along the decoded route. UI unchanged from original.
@@ -19,7 +19,6 @@ import {
   Animated,
   PanResponder,
   ScrollView,
-  Alert,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -38,7 +37,7 @@ import BicycleSvg from "../../assets/icons/bicycle.svg"; // already used in Ride
 import MotorcycleSvg from "../../assets/icons/emoto.svg";
 import CancelReasonModal from "../activities/CancelReasonModal";
 
-const { width, height: SCREEN_H } = Dimensions.get("window");
+const { height: SCREEN_H } = Dimensions.get("window");
 
 const Colors = {
   white: "#FFFFFF",
@@ -82,29 +81,103 @@ function interpolateOnRoute(
   };
 }
 
+/**
+ * Finds the rider's progress along the route as a 0–1 fraction.
+ *
+ * Two fixes vs the original Manhattan-distance version:
+ *  1. Uses real Haversine distance (meters) instead of raw lat/lng delta,
+ *     so distance comparisons are geographically meaningful.
+ *  2. Constrains the search to a window AHEAD of (and slightly behind)
+ *     the last known progress index, and never lets progress move
+ *     backward by more than a small tolerance. This is what actually
+ *     stops the jump — on a curved/looping route, a naive global search
+ *     can match a far-away point that happens to be physically close,
+ *     producing exactly the backward-jump bug described.
+ */
+function haversineMeters(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+): number {
+  const R = 6371000; // Earth radius in meters
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLng = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 function computeProgress(
   riderCoord: { latitude: number; longitude: number },
   routeCoords: { latitude: number; longitude: number }[],
-): number {
-  if (routeCoords.length < 2) return 0;
+  lastIndex: number, // ← new param: the previously matched index
+): { progress: number; index: number } {
+  if (routeCoords.length < 2) return { progress: 0, index: 0 };
+
+  const total = routeCoords.length - 1;
+
+  // Search only a window around the last known position: a bit behind
+  // (in case of GPS noise) and well ahead (in case of a fast update gap).
+  // This is the key fix — it makes "closest point" mean "closest point
+  // the rider could plausibly have reached," not "closest point anywhere
+  // on the entire route," which is what let curved/looping roads confuse
+  // the original global search.
+  const behindWindow = 5;
+  const aheadWindow = 40;
+  const searchStart = Math.max(0, lastIndex - behindWindow);
+  const searchEnd = Math.min(total, lastIndex + aheadWindow);
+
   let minDist = Infinity;
-  let closestIdx = 0;
-  for (let i = 0; i < routeCoords.length; i++) {
-    const d =
-      Math.abs(routeCoords[i].latitude - riderCoord.latitude) +
-      Math.abs(routeCoords[i].longitude - riderCoord.longitude);
+  let closestIdx = lastIndex;
+
+  for (let i = searchStart; i <= searchEnd; i++) {
+    const d = haversineMeters(routeCoords[i], riderCoord);
     if (d < minDist) {
       minDist = d;
       closestIdx = i;
     }
   }
-  return closestIdx / (routeCoords.length - 1);
+
+  // Never let progress jump backward by more than a tiny tolerance —
+  // GPS noise can occasionally place the rider slightly "behind" their
+  // true position, but real backward travel on a one-way delivery route
+  // essentially never happens, so we clamp rather than regress the UI.
+  const finalIdx = Math.max(closestIdx, lastIndex - 1);
+
+  return { progress: finalIdx / total, index: finalIdx };
+}
+
+// Calculates compass bearing (0-360°) from point A to point B.
+// Used to rotate the map so "up" points in the rider's direction of travel.
+function calculateBearing(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number },
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const toDeg = (rad: number) => (rad * 180) / Math.PI;
+
+  const lat1 = toRad(from.latitude);
+  const lat2 = toRad(to.latitude);
+  const dLng = toRad(to.longitude - from.longitude);
+
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+
+  const bearing = toDeg(Math.atan2(y, x));
+  return (bearing + 360) % 360;
 }
 
 export default function ActiveDeliveryScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
   const mapRef = useRef<MapView>(null);
+  const lastProgressIndexRef = useRef(0);
 
   const cancelMutation = useCancelOrder();
   const orderId = (route.params as any)?.orderId as string | undefined;
@@ -142,6 +215,15 @@ export default function ActiveDeliveryScreen() {
     mode: vehicleType === "e-motorcycle" ? "TWO_WHEELER" : "BICYCLE",
   });
 
+  // Follow-camera mode — true once we're actively tracking the rider live
+  const [followMode, setFollowMode] = useState(false);
+  const lastHeadingRef = useRef<number>(0);
+  const lastCoordRef = useRef<{ latitude: number; longitude: number } | null>(
+    null,
+  );
+
+  const [userPanned, setUserPanned] = useState(false);
+
   // Rider position based on progress
   // const [riderCoord, setRiderCoord] = useState<{
   //   latitude: number;
@@ -155,10 +237,48 @@ export default function ActiveDeliveryScreen() {
     orderId: orderId ?? "",
     onRiderLocation: (payload) => {
       const coord = { latitude: payload.lat, longitude: payload.lng };
+
+      // Compute heading from the last known position to this new one,
+      // so the map rotates to face the direction of travel — only if
+      // the rider has actually moved enough to get a meaningful bearing
+      // (avoids jittery rotation from GPS noise while nearly stationary).
+      if (lastCoordRef.current) {
+        const moved =
+          Math.abs(coord.latitude - lastCoordRef.current.latitude) > 0.00005 ||
+          Math.abs(coord.longitude - lastCoordRef.current.longitude) > 0.00005;
+        if (moved) {
+          lastHeadingRef.current = calculateBearing(
+            lastCoordRef.current,
+            coord,
+          );
+        }
+      }
+      lastCoordRef.current = coord;
+
       setLiveRiderCoord(coord);
-      // ✅ compute real progress from live location
       if (routeCoords.length > 1) {
-        setDeliveryProgress(computeProgress(coord, routeCoords));
+        const { progress, index } = computeProgress(
+          coord,
+          routeCoords,
+          lastProgressIndexRef.current,
+        );
+        lastProgressIndexRef.current = index;
+        setDeliveryProgress(progress);
+      }
+
+      // Drive the follow camera — only once we're actually in transit.
+      // enRoute/atPickup phases keep the existing fitToCoordinates behavior
+      // so the customer still sees the full pickup-to-dropoff overview.
+      if (followMode && !userPanned && mapRef.current) {
+        mapRef.current.animateCamera(
+          {
+            center: coord,
+            heading: lastHeadingRef.current,
+            zoom: 17.5,
+            pitch: 0,
+          },
+          { duration: 1500 }, // slightly longer than 1000ms — matches your ~10s GPS push interval better, glides instead of darting
+        );
       }
     },
     onStatusChanged: (payload) => {
@@ -173,16 +293,21 @@ export default function ActiveDeliveryScreen() {
     },
   });
 
+  useEffect(() => {
+    const inTransit = true; // ActiveDeliveryScreen only renders during in_transit/collected per your navigator — adjust if this screen is reused for earlier phases
+    setFollowMode(inTransit);
+  }, []);
+
   // Fit map to show route with room for the card
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || followMode) return; // ← added followMode guard
     const points =
       routeCoords.length > 0 ? routeCoords : [pickupCoord, dropoffCoord];
     mapRef.current.fitToCoordinates(points, {
       edgePadding: { top: 80, right: 60, bottom: SCREEN_H * 0.35, left: 60 },
       animated: true,
     });
-  }, [routeCoords]);
+  }, [routeCoords, followMode]);
 
   const weightLabel =
     weight === "lightweight"
@@ -286,13 +411,15 @@ export default function ActiveDeliveryScreen() {
         style={StyleSheet.absoluteFillObject}
         initialRegion={initialRegion}
         customMapStyle={CUSTOM_MAP_STYLE}
-        scrollEnabled={false}
-        zoomEnabled={false}
-        rotateEnabled={false}
+        scrollEnabled={true}
+        zoomEnabled={true}
+        rotateEnabled={true}
+        pitchEnabled={false}
         showsUserLocation={false}
         showsMyLocationButton={false}
-        showsCompass={false}
+        showsCompass={true}
         toolbarEnabled={false}
+        onPanDrag={() => setUserPanned(true)}
       >
         {routeCoords.length > 0 && (
           <Polyline
@@ -332,20 +459,39 @@ export default function ActiveDeliveryScreen() {
           <Marker
             coordinate={liveRiderCoord ?? riderCoord!}
             anchor={{ x: 0.5, y: 0.5 }}
+            rotation={lastHeadingRef.current}
+            flat={true}
             tracksViewChanges={false}
           >
             <View style={styles.riderMarker}>
-              <Text style={{ fontSize: 20 }}>
-                {vehicleType === "e-motorcycle" ? (
-                  <MotorcycleSvg width={22} height={22} />
-                ) : (
-                  <BicycleSvg width={22} height={22} />
-                )}
-              </Text>
+              {vehicleType === "e-motorcycle" ? (
+                <MotorcycleSvg width={22} height={22} />
+              ) : (
+                <BicycleSvg width={22} height={22} />
+              )}
             </View>
           </Marker>
         )}
       </MapView>
+
+      {userPanned && (
+        <TouchableOpacity
+          style={styles.recenterBtn}
+          onPress={() => {
+            setUserPanned(false);
+            const coord = liveRiderCoord ?? riderCoord;
+            if (coord && mapRef.current) {
+              mapRef.current.animateCamera(
+                { center: coord, heading: lastHeadingRef.current, zoom: 17.5 },
+                { duration: 600 },
+              );
+            }
+          }}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.recenterBtnText}>⊙</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Back Button */}
       <TouchableOpacity
@@ -511,7 +657,9 @@ export default function ActiveDeliveryScreen() {
           if (orderId) {
             try {
               await cancelMutation.mutateAsync({ id: orderId, reason });
-            } catch (_) {}
+            } catch (error) {
+              console.error(error);
+            }
           }
           setCancelModalVisible(false);
           navigation.getParent()?.navigate("MainTabs", { screen: "HomeMap" });
@@ -782,4 +930,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Colors.textPrimary,
   },
+  // Add to your StyleSheet
+  recenterBtn: {
+    position: "absolute",
+    bottom: 200,
+    right: 16,
+    backgroundColor: Colors.white,
+    borderRadius: 22,
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  recenterBtnText: { fontSize: 18 },
 });

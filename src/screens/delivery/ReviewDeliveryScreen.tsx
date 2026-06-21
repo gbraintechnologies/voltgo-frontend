@@ -27,6 +27,7 @@ import { useBookDelivery, usePaymentOptions } from "@/hooks/useApi";
 import TermsConditionsModal from "./TermsCondittionModal";
 import ChevronRightSvg from "../../assets/icons/chevron_right.svg";
 import WalletSvg from "../../assets/icons/topup_icon.svg";
+import { useToast } from "@/components/common/Toast";
 
 const Colors = {
   white: "#FFFFFF",
@@ -64,7 +65,11 @@ function buildScheduledAt(
   return parsed.toISOString();
 }
 
-function PaymentIcon({ method }: { method: { id: string; method: string; label: string } | null }) {
+function PaymentIcon({
+  method,
+}: {
+  method: { id: string; method: string; label: string } | null;
+}) {
   if (!method) {
     return <BundleCreditsSvg width={50} height={46} />;
   }
@@ -74,7 +79,13 @@ function PaymentIcon({ method }: { method: { id: string; method: string; label: 
   }
 
   // MTN MoMo or any momo type
-  if (method.method === "mtn" || method.method === "vodafone" || method.method === "airteltigo" || method.label?.toLowerCase().includes("momo") || method.label?.toLowerCase().includes("mtn")) {
+  if (
+    method.method === "mtn" ||
+    method.method === "vodafone" ||
+    method.method === "airteltigo" ||
+    method.label?.toLowerCase().includes("momo") ||
+    method.label?.toLowerCase().includes("mtn")
+  ) {
     return (
       <Image
         source={require("../../assets/images/mtn_logo.png")}
@@ -84,7 +95,7 @@ function PaymentIcon({ method }: { method: { id: string; method: string; label: 
     );
   }
 
-    // Generic fallback
+  // Generic fallback
   return <WalletSvg width={24} height={24} />;
 }
 
@@ -101,6 +112,8 @@ export default function ReviewDeliveryScreen() {
     price = 24,
     paymentMethod = "Bundle Credits",
   } = route.params ?? {};
+
+  const toast = useToast();
 
   const { data: paymentOptionsRes, isLoading: isLoadingPayments } =
     usePaymentOptions();
@@ -186,7 +199,7 @@ export default function ReviewDeliveryScreen() {
 
   const handleConfirm = async () => {
     if (!selectedPayment) {
-      Alert.alert(
+      toast.error(
         "Payment required",
         "Please select a payment method to continue.",
       );
@@ -224,7 +237,8 @@ export default function ReviewDeliveryScreen() {
           : {}),
       });
 
-      const orderId = (res as any)?.data?.id ?? (res as any)?.data?.data?.id;
+      const orderId =
+        (res as any)?.data?.order?.id ?? (res as any)?.data?.data?.order?.id;
 
       if (isScheduled) {
         navigation.navigate("DeliveryComplete", {
@@ -235,7 +249,7 @@ export default function ReviewDeliveryScreen() {
         navigation.navigate("RiderMatching", { ...route.params, orderId });
       }
     } catch (err: any) {
-      Alert.alert(
+      toast.error(
         "Booking failed",
         err?.message ?? "Could not place order. Please try again.",
       );

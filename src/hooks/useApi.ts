@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "../api/auth";
-import { ordersApi, BookDeliveryBody, OrderStatus } from "../api/orders";
+import { ordersApi, BookDeliveryBody, OrderStatus, Order } from "../api/orders";
 import { bundlesApi, BundleStatus } from "../api/bundles";
 import { paymentApi, AddMomoBody } from "../api/payments";
 import { useAuthStore } from "../stores/authStore";
@@ -156,10 +156,15 @@ export const useMyOrders = (params?: {
 export const useOrderPolling = (id: string) =>
   useQuery({
     queryKey: QK.order(id),
-    queryFn: () => ordersApi.getOrder(id),
+    queryFn: async () => {
+      if (!id) return null;
+      const res: any = await ordersApi.getOrder(id); // GET /orders/{id} — already in your api/orders.ts
+      return res?.data?.data ?? null;
+    },
     enabled: !!id,
     refetchInterval: 5000,
     staleTime: 0,
+    retry: 1,
   });
 
 /** Cancel an order */
@@ -311,7 +316,3 @@ export const useRemovePayment = () => {
     },
   });
 };
-
-
-
-

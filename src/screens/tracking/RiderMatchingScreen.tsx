@@ -1,11 +1,10 @@
-/**
- * RiderMatchingScreen.tsx
- * ─────────────────────────────────────────────────────────
- * Real MapView + Routes API polyline replacing the static placeholder.
- * UI/layout unchanged from original.
- */
-
-import React, { useEffect, useRef, useMemo, useCallback } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+  useState,
+} from "react";
 import {
   View,
   Text,
@@ -16,6 +15,7 @@ import {
   Dimensions,
   StatusBar,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -24,10 +24,11 @@ import { DeliveryStackParamList } from "../../navigation/types";
 import BicycleSvg from "../../assets/icons/bicycle.svg";
 import SearchMagnifySvg from "../../assets/icons/search_magnify.svg";
 import { useRoutePolyline } from "../../utils/useRoutePolyline";
-// import { GOOGLE_MAPS_API_KEY } from "../../utils/mapsConfig";
 import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
-import { useOrderPolling } from "@/hooks/useApi";
+import { useCancelOrder, useOrderPolling } from "@/hooks/useApi";
 import { useOrderSocket } from "@/hooks/useOrderSocket";
+import { joinOrderRoom } from "@/utils/socket";
+import CancelReasonModal from "../activities/CancelReasonModal";
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -47,24 +48,20 @@ const arrowBackSvg = `<svg width="18" height="16" viewBox="0 0 18 16" fill="none
 
 type RouteParams = RouteProp<DeliveryStackParamList, "RiderMatching">;
 
-// Default Accra coords — overridden when real coords are passed via params
 const DEFAULT_PICKUP = { latitude: 5.5968, longitude: -0.1869 };
 const DEFAULT_DROPOFF = { latitude: 5.6502, longitude: -0.187 };
 
 const SNAP_PERCENTAGES = [0.55, 0.88];
 
-// ─── Custom Bottom Sheet ──────────────────────────────────────────────────────
-interface CustomBottomSheetProps {
-  snapPoints: number[];
-  initialSnapIndex?: number;
-  children: React.ReactNode;
-}
-
 function CustomBottomSheet({
   snapPoints,
   initialSnapIndex = 0,
   children,
-}: CustomBottomSheetProps) {
+}: {
+  snapPoints: number[];
+  initialSnapIndex?: number;
+  children: React.ReactNode;
+}) {
   const translateY = useRef(
     new Animated.Value(snapPoints[initialSnapIndex]),
   ).current;
@@ -158,7 +155,6 @@ function CustomBottomSheet({
       style={[sheetStyles.sheet, { transform: [{ translateY }] }]}
       {...panResponder.panHandlers}
     >
-      {/* Handle — decorative only */}
       <View style={sheetStyles.handleArea}>
         <View style={sheetStyles.handle} />
       </View>
@@ -186,37 +182,40 @@ const sheetStyles = StyleSheet.create({
   handle: { width: 38, height: 4, borderRadius: 2, backgroundColor: "#D0D6E0" },
 });
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function RiderMatchingScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
   const params = route.params ?? {};
 
+  const cancelMutation = useCancelOrder();
   const orderId = (params as any).orderId as string | undefined;
+
+  // ← NEW: modal state instead of Alert
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const mapRef = useRef<MapView>(null);
 
-  const { data: orderRes } = useOrderPolling(orderId ?? "");
-  const order = orderRes?.data;
+  const { data: order } = useOrderPolling(orderId ?? "");
 
   const snapPoints = useMemo(
     () => SNAP_PERCENTAGES.map((pct) => SCREEN_HEIGHT * (1 - pct)),
     [],
   );
 
-  // Use coords passed from previous screen, fall back to defaults
   const pickupCoord = (params as any).pickupCoords ?? DEFAULT_PICKUP;
   const dropoffCoord = (params as any).dropoffCoords ?? DEFAULT_DROPOFF;
 
-  // Fetch real route
   const { coords: routeCoords, etaMinutes } = useRoutePolyline({
     origin: pickupCoord,
     destination: dropoffCoord,
     mode: params.vehicleType === "e-motorcycle" ? "TWO_WHEELER" : "BICYCLE",
   });
 
-  // Fit map to route once loaded
+  useEffect(() => {
+    if (orderId) joinOrderRoom(orderId);
+  }, [orderId]);
+
   useEffect(() => {
     if (!mapRef.current) return;
     const points =
@@ -232,7 +231,6 @@ export default function RiderMatchingScreen() {
     });
   }, [routeCoords]);
 
-  // Pulse animation
   useEffect(() => {
     const pulse = Animated.loop(
       Animated.sequence([
@@ -252,27 +250,38 @@ export default function RiderMatchingScreen() {
     return () => pulse.stop();
   }, []);
 
-  // Simulate rider found after 4s
   useEffect(() => {
-  if (!order) return;
-  if (
-    (order.status === "assigned" || order.status === "rider_arriving") &&
-    order.rider
-  ) {
-    navigation.replace("RiderFound", {
-      ...params,
-      orderId,
-      riderName: order.rider.fullName ?? order.rider.full_name ?? "Your Rider",
-      riderPlate: order.rider.vehicle?.plate_no ?? "",
-      riderRating: order.rider.rating ?? 5,
-      vehicleType: params.vehicleType ?? "bicycle",
-      pickupCoords: pickupCoord,
-      dropoffCoords: dropoffCoord,
-    });
-  } else if (order.status === "cancelled" || order.status === "failed") {
-    navigation.navigate("HomeMap");
-  }
-}, [order?.status]);
+    if (!order) return;
+
+    console.log(
+      "Order status:",
+      order.status,
+      "Rider:",
+      order.rider?.full_name,
+    );
+
+    if (order.status === "cancelled" || order.status === "failed") {
+      navigation.getParent()?.navigate("MainTabs", { screen: "HomeMap" });
+      return;
+    }
+
+    if (
+      order.status === "assigned" ||
+      order.status === "rider_arriving" ||
+      order.status === "accepted"
+    ) {
+      navigation.replace("RiderFound", {
+        ...params,
+        orderId,
+        riderName: order.rider?.full_name ?? "Your Rider",
+        riderPlate: order.rider?.vehicle?.plate_no ?? "",
+        riderRating: order.rider?.rating ?? 5,
+        vehicleType: params.vehicleType ?? "motorcycle",
+        pickupCoords: pickupCoord,
+        dropoffCoords: dropoffCoord,
+      });
+    }
+  }, [order?.status]);
 
   useOrderSocket({
     orderId: orderId ?? "",
@@ -281,10 +290,8 @@ export default function RiderMatchingScreen() {
         navigation.replace("RiderFound", {
           ...params,
           orderId,
-          riderName:
-            payload.rider?.full_name ?? payload.rider?.fullName ?? "Your Rider",
-          riderPlate:
-            payload.rider?.vehicle?.plate_no ?? payload.rider?.plate_no ?? "",
+          riderName: payload.rider?.full_name ?? "Your Rider",
+          riderPlate: payload.rider?.vehicle?.plate_no ?? "",
           riderRating: payload.rider?.rating ?? 5,
           riderPhoto: payload.rider?.photo_url ?? null,
           pickupCoords: pickupCoord,
@@ -293,6 +300,15 @@ export default function RiderMatchingScreen() {
       }
     },
   });
+
+  // ← Build a minimal Order-shaped object for the modal
+  // The modal only needs id and dropoff_address
+  const cancelOrderObj = orderId
+    ? {
+        id: orderId,
+        dropoff_address: (params as any).dropoff ?? dropoffCoord,
+      }
+    : null;
 
   const displayEta = etaMinutes ?? 33;
 
@@ -313,7 +329,6 @@ export default function RiderMatchingScreen() {
         backgroundColor="transparent"
       />
 
-      {/* Real Map */}
       <MapView
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
@@ -356,7 +371,6 @@ export default function RiderMatchingScreen() {
         </Marker>
       </MapView>
 
-      {/* Back Button */}
       <TouchableOpacity
         style={styles.backBtn}
         onPress={() => navigation.goBack()}
@@ -365,50 +379,75 @@ export default function RiderMatchingScreen() {
         <SvgXml xml={arrowBackSvg} width={16} height={14} />
       </TouchableOpacity>
 
-      {/* ETA Badge */}
       <View style={styles.etaBadge}>
         <Text style={styles.etaText}>{displayEta} min</Text>
       </View>
 
-      {/* Bottom Sheet */}
       <CustomBottomSheet snapPoints={snapPoints} initialSnapIndex={0}>
         <View style={styles.sheetContent}>
-          <Text style={styles.heading}>Rider Matching</Text>
+          <View style={styles.sheetTop}>
+            <Text style={styles.heading}>Rider Matching</Text>
+            <Animated.View
+              style={[
+                styles.illustrationWrap,
+                { transform: [{ scale: pulseAnim }] },
+              ]}
+            >
+              <SearchMagnifySvg width={52} height={52} />
+              <BicycleSvg width={90} height={68} />
+            </Animated.View>
+            <View style={styles.divider} />
+            <Text style={styles.subtitle}>
+              Hold on while we connect you{"\n"}to the closest rider...
+            </Text>
+          </View>
 
-          <Animated.View
-            style={[
-              styles.illustrationWrap,
-              { transform: [{ scale: pulseAnim }] },
-            ]}
-          >
-            <SearchMagnifySvg width={52} height={52} />
-            <BicycleSvg width={90} height={68} />
-          </Animated.View>
-
-          <View style={styles.divider} />
-
-          <Text style={styles.subtitle}>
-            Hold on while we connect you{"\n"}to the closest rider...
-          </Text>
-
-          <View style={styles.spacer} />
-
-          <TouchableOpacity
-            style={styles.cancelBtn}
-            onPress={() => navigation.navigate("HomeMap")}
-            activeOpacity={0.78}
-          >
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
+          {/* Cancel button — normal flow, directly below the subtitle.
+        No absolute positioning needed: the visible card's height is
+        whatever its content naturally takes up, so this sits right
+        after the text instead of trying to pin to a coordinate inside
+        an 852pt-tall container that's mostly off-screen. */}
+          <View style={{ marginTop: 32 }}>
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={() => setCancelModalVisible(true)}
+              activeOpacity={0.78}
+              disabled={cancelMutation.isPending}
+            >
+              {cancelMutation.isPending ? (
+                <ActivityIndicator size="small" color={Colors.textPrimary} />
+              ) : (
+                <Text style={styles.cancelText}>Cancel</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </CustomBottomSheet>
+
+      {/* ← CancelReasonModal replaces the Alert */}
+      <CancelReasonModal
+        visible={cancelModalVisible}
+        order={cancelOrderObj as any}
+        loading={cancelMutation.isPending}
+        onClose={() => setCancelModalVisible(false)}
+        onConfirm={async (reason) => {
+          if (orderId) {
+            try {
+              await cancelMutation.mutateAsync({ id: orderId, reason });
+            } catch {
+              // Navigate home regardless — order may already be cancelled
+            }
+          }
+          setCancelModalVisible(false);
+          navigation.getParent()?.navigate("MainTabs", { screen: "HomeMap" });
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#E8EEF4" },
-
   pickupDot: {
     width: 22,
     height: 22,
@@ -439,7 +478,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
   },
-
   backBtn: {
     position: "absolute",
     top: Platform.OS === "ios" ? 58 : 42,
@@ -472,11 +510,21 @@ const styles = StyleSheet.create({
   },
 
   sheetContent: {
-    flex: 1,
     paddingHorizontal: 22,
     paddingTop: 4,
-    paddingBottom: 36,
+  },
+  sheetTop: {
     alignItems: "center",
+    paddingBottom: 24,
+  },
+  fixedCancelFooter: {
+    position: "absolute",
+    left: 22,
+    right: 22,
+    top: SCREEN_HEIGHT * 0.55 - 100, // 100px up from where the visible card's bottom edge sits
+  },
+  sheetBottom: {
+    width: "100%",
   },
   heading: {
     fontFamily: "Poppins-Bold",

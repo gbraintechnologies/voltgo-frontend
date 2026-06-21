@@ -19,6 +19,7 @@ import {
   Platform,
   Animated,
   PanResponder,
+  Alert,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -32,6 +33,8 @@ import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
 import BicycleSvg from "../../assets/icons/bicycle.svg"; // already used in RiderFoundScreen
 import MotorcycleSvg from "../../assets/icons/emoto.svg";
 import { useOrderSocket } from "@/hooks/useOrderSocket";
+import { useOrderPolling } from "@/hooks/useApi";
+import ConfirmModal from "@/components/common/ConfirmModal";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
@@ -164,6 +167,7 @@ export default function RiderArrivingScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteParams>();
   const mapRef = useRef<MapView>(null);
+  const [cancelBlockedVisible, setCancelBlockedVisible] = useState(false);
 
   const {
     riderName = "John Cena",
@@ -176,6 +180,11 @@ export default function RiderArrivingScreen() {
   const dropoffCoord = (route.params as any)?.dropoffCoords ?? DEFAULT_DROPOFF;
 
   const orderId = (route.params as any)?.orderId as string | undefined;
+
+  // FIX: REST fallback — every other tracking screen has this, this one
+  // was socket-only, which is why it could get stuck if the socket missed
+  // or hadn't yet delivered the "collected" event.
+  const { data: polledOrder } = useOrderPolling(orderId ?? "");
 
   const [eta, setEta] = useState(5);
   const { translateY, panResponder } = useCustomBottomSheet();
@@ -208,6 +217,22 @@ export default function RiderArrivingScreen() {
       animated: true,
     });
   }, [routeCoords]);
+
+  useEffect(() => {
+    if (!polledOrder) return;
+    if (["collected", "in_transit"].includes(polledOrder.status)) {
+      navigation.replace("ActiveDelivery", {
+        ...route.params,
+        orderId,
+        riderName: polledOrder.rider?.full_name ?? route.params?.riderName,
+        riderPlate:
+          polledOrder.rider?.vehicle?.plate_no ?? route.params?.riderPlate,
+        riderRating: polledOrder.rider?.rating ?? route.params?.riderRating,
+        pickupCoords: route.params?.pickupCoords,
+        dropoffCoords: route.params?.dropoffCoords,
+      });
+    }
+  }, [polledOrder?.status]);
 
   // Animate rider along route
   useEffect(() => {
@@ -265,21 +290,20 @@ export default function RiderArrivingScreen() {
       const coord = { latitude: payload.lat, longitude: payload.lng };
       setRiderCoord(coord);
     },
-    onStatusChanged: (payload:any) => {
-  if (payload.status === "collected") {
-    navigation.replace("ActiveDelivery", {
-      ...route.params,
-      orderId,
-      // ✅ Explicitly pull from payload if available, fallback to params
-      riderName: payload.riderName ?? route.params?.riderName,
-      riderPlate: payload.riderPlate ?? route.params?.riderPlate,
-      riderRating: payload.riderRating ?? route.params?.riderRating,
-      pickupCoords: route.params?.pickupCoords,
-      dropoffCoords: route.params?.dropoffCoords,
-    });
-  }
-},
-
+    onStatusChanged: (payload: any) => {
+      if (payload.status === "collected") {
+        navigation.replace("ActiveDelivery", {
+          ...route.params,
+          orderId,
+          // ✅ Explicitly pull from payload if available, fallback to params
+          riderName: payload.riderName ?? route.params?.riderName,
+          riderPlate: payload.riderPlate ?? route.params?.riderPlate,
+          riderRating: payload.riderRating ?? route.params?.riderRating,
+          pickupCoords: route.params?.pickupCoords,
+          dropoffCoords: route.params?.dropoffCoords,
+        });
+      }
+    },
   });
 
   const displayEta = etaMinutes ?? 33;
@@ -355,13 +379,11 @@ export default function RiderArrivingScreen() {
             tracksViewChanges={true}
           >
             <View style={styles.riderMarker}>
-              <View style={styles.riderMarker}>
-                {vehicleType === "e-motorcycle" ? (
-                  <MotorcycleSvg width={22} height={22} />
-                ) : (
-                  <BicycleSvg width={22} height={22} />
-                )}
-              </View>
+              {vehicleType === "e-motorcycle" ? (
+                <MotorcycleSvg width={22} height={22} />
+              ) : (
+                <BicycleSvg width={22} height={22} />
+              )}
             </View>
           </Marker>
         )}
@@ -464,13 +486,26 @@ export default function RiderArrivingScreen() {
 
           <TouchableOpacity
             style={styles.cancelBtn}
-            onPress={() => navigation.navigate("HomeMap")}
+            onPress={() => setCancelBlockedVisible(true)}
             activeOpacity={0.78}
           >
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </Animated.View>
+
+      <ConfirmModal
+        visible={cancelBlockedVisible}
+        title="Rider already on the way"
+        message="Your rider is heading to pickup and can no longer be cancelled automatically. Contact support if you need to cancel this delivery."
+        confirmLabel="Contact support"
+        cancelLabel="Keep delivery"
+        onConfirm={() => {
+          setCancelBlockedVisible(false);
+          navigation.navigate("Support");
+        }}
+        onCancel={() => setCancelBlockedVisible(false)}
+      />
     </View>
   );
 }
@@ -696,7 +731,3 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 });
-
-
-
-

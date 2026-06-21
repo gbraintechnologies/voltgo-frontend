@@ -205,7 +205,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               styles.toast,
               {
                 backgroundColor: config.bg,
-                borderLeftColor: config.border,
+                // borderLeftColor: config.border,
               },
             ]}
           >
@@ -277,7 +277,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderLeftWidth: 4,
+    // borderLeftWidth: 4,
     gap: 12,
     // Shadow
     shadowColor: "#000",
@@ -325,4 +325,6 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins-Bold",
   },
 });
+
+
 

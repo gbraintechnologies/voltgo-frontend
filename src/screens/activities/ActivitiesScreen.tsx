@@ -333,14 +333,40 @@ function DeliveryCard({
         </TouchableOpacity>
       )}
 
-      {variant === "active" && onTrack && (
-        <TouchableOpacity
-          style={upcomingStyles.trackBtn}
-          onPress={onTrack}
-          activeOpacity={0.85}
-        >
-          <Text style={upcomingStyles.trackBtnText}>Track delivery</Text>
-        </TouchableOpacity>
+      {variant === "active" && (
+        <>
+          {onTrack && (
+            <TouchableOpacity
+              style={upcomingStyles.trackBtn}
+              onPress={onTrack}
+              activeOpacity={0.85}
+            >
+              <Text style={upcomingStyles.trackBtnText}>Track delivery</Text>
+            </TouchableOpacity>
+          )}
+          {/* Show cancel only when no rider assigned yet */}
+          {onCancel &&
+            (item.status === "searching" || item.status === "pending") && (
+              <TouchableOpacity
+                style={[
+                  upcomingStyles.cancelBtn,
+                  { marginTop: 10 },
+                  cancelling && { opacity: 0.5 },
+                ]}
+                onPress={onCancel}
+                disabled={cancelling}
+                activeOpacity={0.75}
+              >
+                {cancelling ? (
+                  <ActivityIndicator size="small" color={Colors.cancelRed} />
+                ) : (
+                  <Text style={upcomingStyles.cancelBtnText}>
+                    Cancel delivery
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+        </>
       )}
     </CardWrapper>
   );
@@ -462,14 +488,79 @@ export default function ActivitiesScreen() {
   };
 
   const handleTrack = (order: Order) => {
-    if (order.status === "rider_arriving") {
-      navigation.navigate("DeliveryFlow", { screen: "RiderArriving" });
-    } else if (["collected", "in_transit"].includes(order.status)) {
-      navigation.navigate("DeliveryFlow", { screen: "ActiveDelivery" });
-    } else {
-      // searching / pending — go back to map where the search/match UI lives
-      navigation.navigate("HomeMap");
+    const sharedParams = {
+      orderId: order.id,
+      pickup: order.pickup_address,
+      dropoff: order.dropoff_address,
+      pickupCoords: {
+        latitude: parseFloat(String(order.pickup_lat)),
+        longitude: parseFloat(String(order.pickup_lng)),
+      },
+      dropoffCoords: {
+        latitude: parseFloat(String(order.dropoff_lat)),
+        longitude: parseFloat(String(order.dropoff_lng)),
+      },
+      vehicleType:
+        order.vehicle_type === "motorcycle" ? "e-motorcycle" : "bicycle",
+      price: parseFloat(String(order.price_ghs ?? 0)),
+      itemType: order.item_description ?? "Parcel",
+      paymentMethod: order.payment_method ?? "bundle",
+    };
+
+    if (order.status === "searching" || order.status === "pending") {
+      // Still looking for a rider — go back to matching screen
+      navigation.navigate("DeliveryFlow", {
+        screen: "RiderMatching",
+        params: sharedParams,
+      });
+      return;
     }
+
+    if (order.status === "assigned") {
+      // Rider found but hasn't started moving yet
+      navigation.navigate("DeliveryFlow", {
+        screen: "RiderFound",
+        params: {
+          ...sharedParams,
+          riderName: order.rider?.full_name ?? "Your Rider",
+          riderPlate: order.rider?.vehicle?.plate_no ?? "",
+          riderRating: parseFloat(String(order.rider?.rating ?? 5)),
+          riderPhoto: order.rider?.photo_url ?? null,
+        },
+      });
+      return;
+    }
+
+    if (order.status === "rider_arriving") {
+      navigation.navigate("DeliveryFlow", {
+        screen: "RiderArriving",
+        params: {
+          ...sharedParams,
+          riderName: order.rider?.full_name ?? "Your Rider",
+          riderPlate: order.rider?.vehicle?.plate_no ?? "",
+          riderRating: parseFloat(String(order.rider?.rating ?? 5)),
+          riderPhoto: order.rider?.photo_url ?? null,
+        },
+      });
+      return;
+    }
+
+    if (order.status === "collected" || order.status === "in_transit") {
+      navigation.navigate("DeliveryFlow", {
+        screen: "ActiveDelivery",
+        params: {
+          ...sharedParams,
+          riderName: order.rider?.full_name ?? "Your Rider",
+          riderPlate: order.rider?.vehicle?.plate_no ?? "",
+          riderRating: parseFloat(String(order.rider?.rating ?? 5)),
+          etaMinutes: 15,
+        },
+      });
+      return;
+    }
+
+    // Fallback
+    navigation.navigate("HomeMap");
   };
 
   const tabs: { key: Tab; label: string }[] = [];
@@ -646,6 +737,11 @@ export default function ActivitiesScreen() {
               item={item}
               variant="active"
               onTrack={() => handleTrack(item)}
+              onCancel={() => handleCancelOrder(item)} // ← add this
+              cancelling={
+                cancelMutation.isPending &&
+                (cancelMutation.variables as any)?.id === item.id
+              }
             />
           ))
         )}
@@ -920,5 +1016,4 @@ const styles = StyleSheet.create({
   },
   repeatBtn: { padding: 6 },
 });
-
 

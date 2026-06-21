@@ -20,7 +20,11 @@ import {
   Platform,
   ActivityIndicator,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import {
+  CommonActions,
+  useNavigation,
+  useRoute,
+} from "@react-navigation/native";
 import Svg, {
   Path,
   Defs,
@@ -51,7 +55,7 @@ const Colors = {
   creditRed: "#E05252",
 };
 
-const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Mon"];
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function daysUntil(dateStr: string) {
   const now = new Date();
@@ -66,6 +70,9 @@ export default function BundlesCreditsScreen() {
   const slideUp = useRef(new Animated.Value(16)).current;
   const cardScale = useRef(new Animated.Value(0.96)).current;
 
+  const route = useRoute<any>();
+  const fromFlow = route.params?.fromFlow;
+
   // ─── FIX 1: handle 404 gracefully ────────────────────────────────────────
   // If useActiveBundle throws on 404, wrap with enabled flag or catch in hook.
   // Here we guard by treating any error as "no bundle" via `isError`.
@@ -76,7 +83,7 @@ export default function BundlesCreditsScreen() {
   } = useActiveBundle();
 
   // ─── FIX 2: API returns `items`, not `orders` ─────────────────────────────
-  const { data: ordersRes } = useMyOrders({ status: "delivered", limit: 20 });
+  const { data: ordersRes } = useMyOrders({ limit: 50 });
 
   // 404 means no active bundle — not a real error, just treat as null
   const activeBundle = bundleError ? null : activeBundleRes?.data;
@@ -108,16 +115,28 @@ export default function BundlesCreditsScreen() {
     ]).start();
   }, []);
 
-  const CHART_DATA = [
-    2200, 1800, 2500, 3800, 5500, 6200, 7800, 9000, 8500, 10500, 11200, 12800,
-    11500, 13500,
-  ];
-  const maxVal = Math.max(...CHART_DATA);
-  const points = CHART_DATA.map((v, i) => {
-    const x = (i / (CHART_DATA.length - 1)) * CHART_W;
-    const y = CHART_H - (v / maxVal) * CHART_H * 0.85;
-    return `${x},${y}`;
-  }).join(" ");
+  const chartData = React.useMemo(() => {
+    const counts = Array(7).fill(0);
+    recentOrders.forEach((order: any) => {
+      const day = new Date(order.created_at).getDay();
+      counts[day]++;
+    });
+    return counts;
+  }, [recentOrders]);
+
+  const hasRealData = recentOrders.length > 0;
+
+  // If no real data, show a gentle dummy curve so the chart isn't empty
+  const displayData = hasRealData ? chartData : [1, 2, 1, 3, 2, 4, 3]; // placeholder shape, visually honest
+
+  const maxVal = Math.max(...displayData, 1);
+  const points = displayData
+    .map((v, i) => {
+      const x = (i / (displayData.length - 1)) * CHART_W;
+      const y = CHART_H - (v / maxVal) * CHART_H * 0.85;
+      return `${x},${y}`;
+    })
+    .join(" ");
 
   const expiryDays = activeBundle ? daysUntil(activeBundle.expires_at) : 0;
 
@@ -128,7 +147,25 @@ export default function BundlesCreditsScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            if (fromFlow) {
+              // Came from purchase flow — jump straight to Account tab, clear stack
+              navigation.dispatch(
+                CommonActions.reset({
+                  index: 0,
+                  routes: [
+                    {
+                      name: "MainTabs",
+                      params: { screen: "Account" },
+                    },
+                  ],
+                }),
+              );
+            } else {
+              // Came from Account screen — simple back
+              navigation.goBack();
+            }
+          }}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <ArrowBackSvg width={60} height={58} />
@@ -269,13 +306,31 @@ export default function BundlesCreditsScreen() {
               <Text style={styles.periodText}>{period} ▾</Text>
             </TouchableOpacity>
           </View>
-          <View style={styles.chartWrap}>
+
+          {/* Add this label when no data */}
+          {!hasRealData && (
+            <Text
+              style={{
+                fontFamily: "Poppins-Regular",
+                fontSize: 12,
+                color: Colors.textMuted,
+                marginBottom: 8,
+              }}
+            >
+              Chart will populate once you start making deliveries.
+            </Text>
+          )}
+
+          <View style={[styles.chartWrap, !hasRealData && { opacity: 0.35 }]}>
             <View style={styles.yLabels}>
-              {["15k", "12k", "9k", "6k", "3k", "0k"].map((l) => (
-                <Text key={l} style={styles.yLabel}>
-                  {l}
-                </Text>
-              ))}
+              {[...Array(6)].map((_, i) => {
+                const val = Math.round((maxVal / 5) * (5 - i));
+                return (
+                  <Text key={i} style={styles.yLabel}>
+                    {val}
+                  </Text>
+                );
+              })}
             </View>
             <View style={{ flex: 1 }}>
               <Svg width={CHART_W} height={CHART_H + 10}>
@@ -390,7 +445,7 @@ export default function BundlesCreditsScreen() {
                     })}
                   </Text>
                   <Text style={styles.recentAmount}>
-                    GHS {item.price_ghs?.toFixed(0)}
+                    GHS {Number(item.price_ghs ?? 0).toFixed(0)}
                   </Text>
                 </View>
               </View>

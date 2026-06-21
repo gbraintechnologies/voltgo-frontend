@@ -7,14 +7,14 @@ import {
   Animated,
   StatusBar,
   Platform,
-  ScrollView,
   Image,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
-import RepeatIconSvg from "../../assets/icons/repeat_icon.svg";
 import PinLocationSvg from "../../assets/icons/pin_location.svg";
 import BundleCreditsSvg from "../../assets/icons/bundle_credits.svg";
+import { Order } from "../../api/orders";
+import { useOrderPolling } from "@/hooks/useApi";
 
 const Colors = {
   white: "#FFFFFF",
@@ -30,31 +30,22 @@ const Colors = {
   bundleIconBg: "#E8F4FF",
 };
 
-// Extend the activity type to carry full detail
-export type PastActivityDetail = {
-  id: string;
-  month: string;
-  destination: string;
-  date: string;
-  amount: string;
-  vehicle: string;
-  // extended
-  pickup?: string;
-  senderName?: string;
-  itemType?: string;
-  recipientName?: string;
-  paymentMethod?: string;
-  status?: "delivered" | "cancelled";
-  deliveryId?: string;
-};
+function formatDate(iso: string) {
+  const d = new Date(iso);
+  return `${d.getDate()} ${d.toLocaleString("en", { month: "long" })} ${d.getFullYear()} · ${d
+    .getHours()
+    .toString()
+    .padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+}
 
 export default function PastActivityDetailScreen() {
   const navigation = useNavigation<any>();
   const route =
-    useRoute<
-      RouteProp<{ params: { activity: PastActivityDetail } }, "params">
-    >();
-  const { activity } = route.params;
+    useRoute<RouteProp<{ params: { activity: Order } }, "params">>();
+  const { activity: paramActivity } = route.params;
+
+  const { data: liveOrder } = useOrderPolling(paramActivity.id);
+  const activity = liveOrder ?? paramActivity;
 
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(24)).current;
@@ -75,7 +66,11 @@ export default function PastActivityDetailScreen() {
     ]).start();
   }, []);
 
-  const status = activity.status ?? "delivered";
+  const status = activity.status === "delivered" ? "delivered" : "cancelled";
+  const amountFormatted = `GHS ${Number(activity.price_ghs ?? 0).toFixed(2)}`;
+  const vehicleLabel =
+    activity.vehicle_type === "bicycle" ? "Bicycle" : "E-Moto";
+  const isDelivered = status === "delivered";
 
   return (
     <View style={styles.container}>
@@ -103,36 +98,33 @@ export default function PastActivityDetailScreen() {
         <View
           style={[
             styles.statusBadge,
-            status === "delivered"
-              ? styles.statusDelivered
-              : styles.statusCancelled,
+            isDelivered ? styles.statusDelivered : styles.statusCancelled,
           ]}
         >
           <View
             style={[
               styles.statusDot,
               {
-                backgroundColor:
-                  status === "delivered" ? Colors.successText : "#EF4444",
+                backgroundColor: isDelivered ? Colors.successText : "#EF4444",
               },
             ]}
           />
           <Text
             style={[
               styles.statusText,
-              {
-                color: status === "delivered" ? Colors.successText : "#EF4444",
-              },
+              { color: isDelivered ? Colors.successText : "#EF4444" },
             ]}
           >
-            {status === "delivered" ? "Delivered" : "Cancelled"}
+            {isDelivered ? "Delivered" : "Cancelled"}
           </Text>
         </View>
 
         {/* Amount hero */}
         <View style={styles.amountHero}>
-          <Text style={styles.amountValue}>{activity.amount}</Text>
-          <Text style={styles.amountDate}>{activity.date}</Text>
+          <Text style={styles.amountValue}>{amountFormatted}</Text>
+          <Text style={styles.amountDate}>
+            {formatDate(activity.created_at)}
+          </Text>
         </View>
 
         {/* Vehicle + Delivery ID row */}
@@ -140,20 +132,18 @@ export default function PastActivityDetailScreen() {
           <View style={styles.vehicleChip}>
             <Image
               source={
-                activity.vehicle === "bicycle"
+                activity.vehicle_type === "bicycle"
                   ? require("../../assets/images/bicycle_small.png")
                   : require("../../assets/images/emoto_small.png")
               }
               style={styles.vehicleImg}
               resizeMode="contain"
             />
-            <Text style={styles.vehicleLabel}>
-              {activity.vehicle === "bicycle" ? "Bicycle" : "E-Moto"}
-            </Text>
+            <Text style={styles.vehicleLabel}>{vehicleLabel}</Text>
           </View>
-          {activity.deliveryId && (
-            <Text style={styles.deliveryId}>#{activity.deliveryId}</Text>
-          )}
+          <Text style={styles.deliveryId}>
+            #{activity.id.slice(-8).toUpperCase()}
+          </Text>
         </View>
 
         {/* Divider */}
@@ -170,9 +160,7 @@ export default function PastActivityDetailScreen() {
             </View>
             <View style={styles.routeTextWrap}>
               <Text style={styles.routeLabel}>Pickup</Text>
-              <Text style={styles.routeValue}>
-                {activity.pickup ?? "American House"}
-              </Text>
+              <Text style={styles.routeValue}>{activity.pickup_address}</Text>
             </View>
           </View>
 
@@ -190,7 +178,7 @@ export default function PastActivityDetailScreen() {
             </View>
             <View style={styles.routeTextWrap}>
               <Text style={styles.routeLabel}>Drop-off</Text>
-              <Text style={styles.routeValue}>{activity.destination}</Text>
+              <Text style={styles.routeValue}>{activity.dropoff_address}</Text>
             </View>
           </View>
         </View>
@@ -201,15 +189,18 @@ export default function PastActivityDetailScreen() {
 
         <View style={styles.detailCard}>
           <DetailRow
-            label="Sender"
-            value={activity.senderName ?? "John Agyekum Barimah"}
+            label="Item type"
+            value={activity.item_description ?? "Parcel"}
           />
-          <DetailRow label="Item type" value={activity.itemType ?? "Parcel"} />
-          <DetailRow
-            label="Recipient"
-            value={activity.recipientName ?? "N/A"}
-            last
-          />
+          {activity.special_instructions ? (
+            <DetailRow
+              label="Instructions"
+              value={activity.special_instructions}
+              last
+            />
+          ) : (
+            <DetailRow label="Recipient" value="N/A" last />
+          )}
         </View>
 
         {/* Payment */}
@@ -221,27 +212,35 @@ export default function PastActivityDetailScreen() {
             <BundleCreditsSvg width={60} height={56} />
           </View>
           <Text style={styles.paymentLabel}>
-            {activity.paymentMethod ?? "Bundle Credits"}
+            {activity.payment_method === "bundle_credit"
+              ? "Bundle Credits"
+              : (activity.payment_method ?? "—")}
           </Text>
-          <Text style={styles.paymentPrice}>{activity.amount}</Text>
+          <Text style={styles.paymentPrice}>{amountFormatted}</Text>
         </View>
 
-        {/* Repeat CTA */}
-        <View style={styles.sectionGap} />
-        <TouchableOpacity
-          style={styles.repeatBtn}
-          onPress={() =>
-            navigation.navigate("ChooseRoute", {
-              prefillPickup: activity.pickup,
-              prefillDropoff: activity.destination,
-            })
-          }
-          activeOpacity={0.85}
-        >
-          {/* <RepeatIconSvg width={18} height={18} fill="white" /> */}
-          <Image source={require("../../assets/images/repeat.png")} style={{ width: 18, height: 18}}/>
-          <Text style={styles.repeatBtnText}>Repeat delivery</Text>
-        </TouchableOpacity>
+        {/* Repeat CTA — only for delivered orders */}
+        {isDelivered && (
+          <>
+            <View style={styles.sectionGap} />
+            <TouchableOpacity
+              style={styles.repeatBtn}
+              onPress={() =>
+                navigation.navigate("ChooseRoute", {
+                  prefillPickup: activity.pickup_address,
+                  prefillDropoff: activity.dropoff_address,
+                })
+              }
+              activeOpacity={0.85}
+            >
+              <Image
+                source={require("../../assets/images/repeat.png")}
+                style={{ width: 18, height: 18 }}
+              />
+              <Text style={styles.repeatBtnText}>Repeat delivery</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </Animated.ScrollView>
     </View>
   );
@@ -381,15 +380,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 14,
-    // borderWidth: 1.5,
-    // borderColor: Colors.border,
-       backgroundColor: '#eee',
-
-    // shadowColor: "#000",
-    // shadowOffset: { width: 0, height: 2 },
-    // shadowOpacity: 0.05,
-    // shadowRadius: 6,
-    // elevation: 2,
+    backgroundColor: "#eee",
   },
   vehicleImg: { width: 36, height: 28 },
   vehicleLabel: {
@@ -407,16 +398,8 @@ const styles = StyleSheet.create({
 
   routeCard: {
     borderRadius: 16,
-    // borderWidth: 1.5,
-    // borderColor: Colors.border,
     paddingHorizontal: 16,
     paddingVertical: 16,
-    // backgroundColor: Colors.white,
-    // shadowColor: "#000",
-    // shadowOffset: { width: 0, height: 2 },
-    // shadowOpacity: 0.06,
-    // shadowRadius: 8,
-    // elevation: 3,
   },
   routeRow: { flexDirection: "row", alignItems: "flex-start", gap: 14 },
   routeDotWrap: { width: 20, alignItems: "center", paddingTop: 3 },
@@ -448,15 +431,7 @@ const styles = StyleSheet.create({
 
   detailCard: {
     borderRadius: 16,
-    // borderWidth: 1.5,
-    // borderColor: Colors.border,
     paddingHorizontal: 16,
-    // backgroundColor: Colors.bundleIconBg,
-//     shadowColor: "#000",
-//     shadowOffset: { width: 0, height: 2 },
-//     shadowOpacity: 0.06,
-//     shadowRadius: 8,
-//     elevation: 3,
   },
 
   sectionGap: { height: 24 },
@@ -464,7 +439,6 @@ const styles = StyleSheet.create({
   paymentCard: {
     flexDirection: "row",
     alignItems: "center",
-    // backgroundColor: Colors.bundleIconBg,
     borderRadius: 14,
     padding: 14,
     gap: 12,
@@ -473,7 +447,6 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 10,
-    // backgroundColor: Colors.bundleIcon,
     alignItems: "center",
     justifyContent: "center",
   },

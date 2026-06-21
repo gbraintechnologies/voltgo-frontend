@@ -39,3 +39,66 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+
+   <View style={[styles.sheetContent, { paddingBottom: insets.bottom + 8 }]}>
+          <TouchableOpacity
+            style={styles.sendPackageRow}
+            onPress={() => navigation.navigate("DeliveryFlow")}
+            activeOpacity={0.82}
+          >
+            <View style={styles.sendLeft}>
+              <View style={styles.packageIconWrap}>
+                <ParcelSvg width={40} height={40} />
+              </View>
+              <Text style={styles.sendLabel}>Send Package</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.calendarBtn}
+              onPress={() =>
+                navigation.navigate("DeliveryFlow", {
+                  screen: "SchedulePickup",
+                })
+              }
+              activeOpacity={0.7}
+            >
+              <Calendersvg width={25} height={25} />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
+
+
+
+        sheetContent: { paddingHorizontal: 24, paddingTop: 0 },
+  sendPackageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#eeeeee",
+    borderRadius: Radius.lg,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  sendLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  packageIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: Radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sendLabel: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 16,
+    color: Colors.textPrimary,
+  },
+  calendarBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.inputBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

@@ -1,13 +1,14 @@
-import { create } from 'zustand';
-import { tokenStorage } from '../api/client';
-import { CustomerProfile } from '../api/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from "zustand";
+import { tokenStorage } from "../api/client";
+import { CustomerProfile } from "../api/auth";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { primeSocketToken } from "@/utils/socket";
 
-const ONBOARDING_KEY = 'has_seen_onboarding';
+const ONBOARDING_KEY = "has_seen_onboarding";
 
 const onboardingStorage = {
-  markSeen: () => AsyncStorage.setItem(ONBOARDING_KEY, 'true'),
-  hasSeen: async () => (await AsyncStorage.getItem(ONBOARDING_KEY)) === 'true',
+  markSeen: () => AsyncStorage.setItem(ONBOARDING_KEY, "true"),
+  hasSeen: async () => (await AsyncStorage.getItem(ONBOARDING_KEY)) === "true",
 };
 
 interface AuthState {
@@ -20,13 +21,21 @@ interface AuthState {
   pendingPassword: string | null;
   pendingFullName: string | null;
 
-  setAuthenticated: (customer: CustomerProfile, access: string, refresh: string) => Promise<void>;
+  setAuthenticated: (
+    customer: CustomerProfile,
+    access: string,
+    refresh: string,
+  ) => Promise<void>;
   setCustomer: (customer: CustomerProfile) => void;
   logout: () => Promise<void>;
   hydrateFromStorage: () => Promise<void>;
   setHasSeenOnboarding: () => Promise<void>;
 
-  setPendingRegistration: (fullName: string, phone: string, password: string) => void;
+  setPendingRegistration: (
+    fullName: string,
+    phone: string,
+    password: string,
+  ) => void;
   clearPendingRegistration: () => void;
 }
 
@@ -41,6 +50,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   setAuthenticated: async (customer, access, refresh) => {
     await tokenStorage.setTokens(access, refresh);
+    await primeSocketToken(); // ← add this
     set({ isAuthenticated: true, customer });
   },
 
@@ -64,17 +74,34 @@ export const useAuthStore = create<AuthState>((set) => ({
         onboardingStorage.hasSeen(),
       ]);
       if (!token) {
-        set({ isLoading: false, isAuthenticated: false, hasSeenOnboarding: seenOnboarding });
+        set({
+          isLoading: false,
+          isAuthenticated: false,
+          hasSeenOnboarding: seenOnboarding,
+        });
         return;
       }
-      set({ isLoading: false, isAuthenticated: true, hasSeenOnboarding: seenOnboarding });
+      await primeSocketToken(); // ← add this
+      set({
+        isLoading: false,
+        isAuthenticated: true,
+        hasSeenOnboarding: seenOnboarding,
+      });
     } catch {
-      set({ isLoading: false, isAuthenticated: false, hasSeenOnboarding: false });
+      set({
+        isLoading: false,
+        isAuthenticated: false,
+        hasSeenOnboarding: false,
+      });
     }
   },
 
   setPendingRegistration: (fullName, phone, password) =>
-    set({ pendingFullName: fullName, pendingPhone: phone, pendingPassword: password }),
+    set({
+      pendingFullName: fullName,
+      pendingPhone: phone,
+      pendingPassword: password,
+    }),
 
   clearPendingRegistration: () =>
     set({ pendingFullName: null, pendingPhone: null, pendingPassword: null }),
@@ -94,4 +121,5 @@ export function startSessionWatcher() {
     }
   }, 3000);
 }
+
 

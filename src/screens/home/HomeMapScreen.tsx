@@ -40,13 +40,13 @@ import BicycleMarkerSvg from "../../assets/icons/bicycle.svg";
 import ScooterMarkerSvg from "../../assets/icons/emoto.svg";
 
 import { useOrderSocket } from "../../hooks/useOrderSocket";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { QK } from "../../hooks/useApi";
 
 import { useDeviceLocation } from "../../contexts/LocationContext";
 import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
 import { useMyOrders } from "../../hooks/useApi";
-import { Order } from "../../api/orders";
+import { Order, ordersApi } from "../../api/orders";
 import {
   GOOGLE_MAPS_API_KEY,
   PLACES_LOCATION_BIAS,
@@ -186,7 +186,13 @@ export default function HomeMapScreen() {
 
   const { coords: deviceCoords } = useDeviceLocation();
 
-  const { data: ordersRes } = useMyOrders({ limit: 20 });
+  const { data: ordersRes } = useQuery({
+    queryKey: QK.orders(),
+    queryFn: () => ordersApi.getMyOrders({ limit: 20 }),
+    refetchInterval: 5000, // poll every 5s on home screen
+    staleTime: 0,
+  });
+
   const allOrders: Order[] =
     (ordersRes?.data as any)?.items ?? ordersRes?.data?.orders ?? [];
   const activeOrders = allOrders.filter((o) =>
@@ -300,6 +306,23 @@ export default function HomeMapScreen() {
       });
     }, 320);
   }, [pendingResult, searchTarget, closeSearch, navigation]);
+
+  useEffect(() => {
+    if (!topActive) return;
+
+    if (
+      topActive.status === "assigned" ||
+      topActive.status === "rider_arriving"
+    ) {
+      // Auto-navigate to RiderFound if we were on matching
+      // Only if the current route is HomeMap (not already on tracking screens)
+      const currentRoute = navigation.getState()?.routes?.slice(-1)[0]?.name;
+      if (currentRoute === "HomeMap") {
+        // Don't auto-navigate from home — let user tap the card
+        // But DO add refetchInterval to useMyOrders:
+      }
+    }
+  }, [topActive?.status]);
 
   useEffect(() => {
     if (deviceCoords && mapRef.current) {
@@ -439,13 +462,75 @@ export default function HomeMapScreen() {
 
   const handleActivePress = () => {
     if (!topActive) return;
-    if (topActive.status === "rider_arriving") {
-      navigation.navigate("DeliveryFlow", { screen: "RiderArriving" });
-    } else if (["collected", "in_transit"].includes(topActive.status)) {
-      navigation.navigate("DeliveryFlow", { screen: "ActiveDelivery" });
-    } else {
-      navigation.navigate("Activities", { initialTab: "active" });
+
+    const sharedParams = {
+      orderId: topActive.id,
+      pickup: topActive.pickup_address,
+      dropoff: topActive.dropoff_address,
+      pickupCoords: {
+        latitude: parseFloat(String(topActive.pickup_lat)),
+        longitude: parseFloat(String(topActive.pickup_lng)),
+      },
+      dropoffCoords: {
+        latitude: parseFloat(String(topActive.dropoff_lat)),
+        longitude: parseFloat(String(topActive.dropoff_lng)),
+      },
+      vehicleType:
+        topActive.vehicle_type === "motorcycle" ? "e-motorcycle" : "bicycle",
+      price: parseFloat(String(topActive.price_ghs ?? 0)),
+      itemType: topActive.item_description ?? "Parcel",
+      paymentMethod: topActive.payment_method ?? "bundle",
+    };
+
+    if (topActive.status === "searching" || topActive.status === "pending") {
+      navigation.navigate("DeliveryFlow", {
+        screen: "RiderMatching",
+        params: sharedParams,
+      });
+      return;
     }
+
+    if (topActive.status === "assigned") {
+      navigation.navigate("DeliveryFlow", {
+        screen: "RiderFound",
+        params: {
+          ...sharedParams,
+          riderName: topActive.rider?.full_name ?? "Your Rider",
+          riderPlate: topActive.rider?.vehicle?.plate_no ?? "",
+          riderRating: parseFloat(String(topActive.rider?.rating ?? 5)),
+        },
+      });
+      return;
+    }
+
+    if (topActive.status === "rider_arriving") {
+      navigation.navigate("DeliveryFlow", {
+        screen: "RiderArriving",
+        params: {
+          ...sharedParams,
+          riderName: topActive.rider?.full_name ?? "Your Rider",
+          riderPlate: topActive.rider?.vehicle?.plate_no ?? "",
+          riderRating: parseFloat(String(topActive.rider?.rating ?? 5)),
+        },
+      });
+      return;
+    }
+
+    if (topActive.status === "collected" || topActive.status === "in_transit") {
+      navigation.navigate("DeliveryFlow", {
+        screen: "ActiveDelivery",
+        params: {
+          ...sharedParams,
+          riderName: topActive.rider?.full_name ?? "Your Rider",
+          riderPlate: topActive.rider?.vehicle?.plate_no ?? "",
+          riderRating: parseFloat(String(topActive.rider?.rating ?? 5)),
+          etaMinutes: 15,
+        },
+      });
+      return;
+    }
+
+    navigation.navigate("Activities", { initialTab: "active" });
   };
 
   //   const handleActivePress = () => {
@@ -1305,3 +1390,5 @@ const emptyStyles = StyleSheet.create({
     borderBottomRightRadius: 2,
   },
 });
+
+

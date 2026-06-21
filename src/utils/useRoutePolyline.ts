@@ -78,7 +78,7 @@ export function useRoutePolyline({
       setLoading(true);
       setError(null);
 
-      try {
+      const tryFetch = async (travelMode: TravelMode) => {
         const body = {
           origin: {
             location: {
@@ -96,9 +96,11 @@ export function useRoutePolyline({
               },
             },
           },
-          travelMode: mode,
+          travelMode,
           routingPreference:
-            mode === "DRIVE" ? "TRAFFIC_AWARE" : "ROUTING_PREFERENCE_UNSPECIFIED",
+            travelMode === "DRIVE"
+              ? "TRAFFIC_AWARE"
+              : "ROUTING_PREFERENCE_UNSPECIFIED",
           computeAlternativeRoutes: false,
           routeModifiers: {
             avoidTolls: false,
@@ -114,7 +116,6 @@ export function useRoutePolyline({
           headers: {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
-            // Field mask — only request what we need (keeps response small & cheaper)
             "X-Goog-FieldMask":
               "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline",
           },
@@ -128,14 +129,29 @@ export function useRoutePolyline({
         }
 
         const data = await res.json();
-
         if (!data.routes || data.routes.length === 0) {
           throw new Error("No routes found");
         }
+        return data.routes[0];
+      };
 
-        const route = data.routes[0];
+      try {
+        let route: any;
+        try {
+          route = await tryFetch(mode);
+        } catch (firstErr: any) {
+          if (firstErr.name === "AbortError") throw firstErr;
+          // Fallback: if BICYCLE/TWO_WHEELER not supported in this region, use DRIVE
+          if (mode === "BICYCLE" || mode === "TWO_WHEELER") {
+            console.info(
+              `[useRoutePolyline] ${mode} not available, falling back to DRIVE`,
+            );
+            route = await tryFetch("DRIVE");
+          } else {
+            throw firstErr;
+          }
+        }
 
-        // Decode polyline → [{ latitude, longitude }]
         const decoded = polyline
           .decode(route.polyline.encodedPolyline)
           .map(([lat, lng]: [number, number]) => ({
@@ -145,7 +161,6 @@ export function useRoutePolyline({
 
         setCoords(decoded);
 
-        // Duration comes back as e.g. "312s"
         if (route.duration) {
           const seconds = parseInt(route.duration.replace("s", ""), 10);
           setEtaMinutes(Math.round(seconds / 60));
@@ -170,7 +185,6 @@ export function useRoutePolyline({
 
   return { coords, etaMinutes, loading, error };
 }
-
 
 
 

@@ -96,7 +96,7 @@ export default function BundleHistoryScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.navigate("BundlesCredits", { fromFlow: true })}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <ArrowBackSvg width={60} height={58} />

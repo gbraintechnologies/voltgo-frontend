@@ -17,6 +17,7 @@ import { useNavigation } from "@react-navigation/native";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
 import { useCustomerProfile, useUpdateProfile } from "../../hooks/useApi";
 import { useAuthStore } from "../../stores/authStore";
+import { useToast } from "@/components/common/Toast";
 
 const Colors = {
   white: "#FFFFFF",
@@ -36,6 +37,7 @@ export default function ProfileScreen() {
   const { data, isLoading } = useCustomerProfile();
   const storedCustomer = useAuthStore((s: any) => s.customer);
   const setCustomer = useAuthStore((s: any) => s.setCustomer);
+  const toast = useToast();
 
   const profile = data?.data ?? storedCustomer;
 
@@ -69,10 +71,10 @@ export default function ProfileScreen() {
         full_name: name || undefined,
         email: email || undefined,
       });
-      Alert.alert("Saved", "Profile updated successfully.");
-      navigation.navigate('Account')
+      toast.success("Saved", "Profile updated successfully.");
+      navigation.navigate("Account");
     } catch (_) {
-      Alert.alert("Error", "Could not save profile. Please try again.");
+      toast.error("Error", "Could not save profile. Please try again.");
     }
   };
 

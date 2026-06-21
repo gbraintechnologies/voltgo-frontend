@@ -4,7 +4,13 @@
  * Real MapView + Routes API polyline. UI unchanged from original.
  */
 
-import React, { useEffect, useRef, useMemo, useCallback } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+  useState,
+} from "react";
 import {
   View,
   Text,
@@ -17,6 +23,7 @@ import {
   Animated,
   PanResponder,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -26,8 +33,9 @@ import BicycleSvg from "../../assets/icons/bicycle-5.svg";
 import StarSvg from "../../assets/icons/star.svg";
 import { useRoutePolyline } from "../../utils/useRoutePolyline";
 import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
-import { useOrderPolling } from "@/hooks/useApi";
+import { useCancelOrder, useOrderPolling } from "@/hooks/useApi";
 import { useOrderSocket } from "@/hooks/useOrderSocket";
+import CancelReasonModal from "../activities/CancelReasonModal";
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -153,8 +161,8 @@ export default function RiderFoundScreen() {
   const mapRef = useRef<MapView>(null);
 
   const orderId = (route.params as any)?.orderId as string | undefined;
-  const { data: orderRes } = useOrderPolling(orderId ?? "");
-  const orderStatus = orderRes?.data?.status;
+  const { data: order } = useOrderPolling(orderId ?? "");
+  const orderStatus = order?.status;
 
   const {
     riderName = "John Cena",
@@ -181,13 +189,13 @@ export default function RiderFoundScreen() {
     mode: vehicleType === "e-motorcycle" ? "TWO_WHEELER" : "BICYCLE",
   });
 
+  const cancelMutation = useCancelOrder();
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
+
   useEffect(() => {
     console.log("RiderFound params:", JSON.stringify(route.params, null, 2));
-    console.log(
-      "orderRes rider:",
-      JSON.stringify(orderRes?.data?.rider, null, 2),
-    );
-  }, [orderRes]);
+    console.log("orderRes rider:", JSON.stringify(order, null, 2));
+  }, [order]);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -206,7 +214,7 @@ export default function RiderFoundScreen() {
 
   useOrderSocket({
     orderId: orderId ?? "",
-    onStatusChanged: (payload:any) => {
+    onStatusChanged: (payload: any) => {
       const status = payload.status as string;
       if (status === "rider_arriving") {
         navigation.replace("RiderArriving", {
@@ -398,15 +406,41 @@ export default function RiderFoundScreen() {
             </Text>
           </TouchableOpacity>
           <View style={{ height: 12 }} />
+          // Replace the Cancel button:
           <TouchableOpacity
             style={styles.cancelBtn}
-            onPress={() => navigation.navigate("MainTabs")}
+            onPress={() => setCancelModalVisible(true)}
             activeOpacity={0.78}
+            disabled={cancelMutation.isPending}
           >
-            <Text style={styles.cancelText}>Cancel</Text>
+            {cancelMutation.isPending ? (
+              <ActivityIndicator size="small" color={Colors.textPrimary} />
+            ) : (
+              <Text style={styles.cancelText}>Cancel</Text>
+            )}
           </TouchableOpacity>
         </View>
       </CustomBottomSheet>
+
+      <CancelReasonModal
+        visible={cancelModalVisible}
+        order={
+          orderId
+            ? ({ id: orderId, dropoff_address: route.params?.dropoff } as any)
+            : null
+        }
+        loading={cancelMutation.isPending}
+        onClose={() => setCancelModalVisible(false)}
+        onConfirm={async (reason) => {
+          if (orderId) {
+            try {
+              await cancelMutation.mutateAsync({ id: orderId, reason });
+            } catch {}
+          }
+          setCancelModalVisible(false);
+          navigation.navigate("HomeMap");
+        }}
+      />
     </View>
   );
 }
