@@ -46,6 +46,24 @@ function ProviderLogo({ method }: { method: PaymentMethod }) {
       />
     );
   }
+  if (method.provider === "vodafone_cash") {
+    return (
+      <Image
+        source={require("../../assets/images/telecel_logo.png")}
+        style={{ width: 36, height: 36 }}
+        resizeMode="contain"
+      />
+    );
+  }
+  if (method.provider === "airteltigo_money") {
+    return (
+      <Image
+        source={require("../../assets/images/at_logo.png")}
+        style={{ width: 36, height: 36 }}
+        resizeMode="contain"
+      />
+    );
+  }
   if (method.type === "card") {
     return (
       <Image
@@ -55,29 +73,7 @@ function ProviderLogo({ method }: { method: PaymentMethod }) {
       />
     );
   }
-  // Fix: match your actual PaymentMethod provider union values
-  return (
-    <View
-      style={{
-        width: 36,
-        height: 36,
-        borderRadius: 8,
-        backgroundColor: "#E0001A",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Text
-        style={{
-          color: "#fff",
-          fontFamily: "HelveticaNeue-CondensedBold",
-          fontSize: 11,
-        }}
-      >
-        {method.provider === "airteltigo_money" ? "AT" : "Tel"}
-      </Text>
-    </View>
-  );
+  return null;
 }
 
 export default function PaymentMethodsScreen() {
@@ -140,7 +136,7 @@ export default function PaymentMethodsScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
-          onPress={() => navigation.navigate('Account')}
+          onPress={() => navigation.navigate("Account")}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <ArrowBackSvg width={60} height={58} />
@@ -382,5 +378,3 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
 });
-
-

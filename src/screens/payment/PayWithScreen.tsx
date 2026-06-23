@@ -52,6 +52,8 @@ export default function PayWithScreen() {
   const { data: optionsRes, isLoading } = usePaymentOptions();
   const bookMutation = useBookDelivery();
 
+  const { currentPaymentId } = route.params ?? {};
+
   const {
     vehicleType,
     price,
@@ -70,8 +72,10 @@ export default function PayWithScreen() {
             id: "bundle_credit",
             type: "bundle_credit",
             label: "Bundle Credit",
-            sub: `${rawData.bundle_credit.credits_remaining ?? 0} deliveries remaining`,
-
+            sub:
+              (rawData.bundle_credit.credits_remaining ?? 0) > 0
+                ? `${rawData.bundle_credit.credits_remaining} deliveries remaining`
+                : "0 credits remaining — top up to use", // ← clearer message
             is_default: false,
           },
         ]
@@ -104,9 +108,16 @@ export default function PayWithScreen() {
   // Auto-select default or first option
   useEffect(() => {
     if (paymentOptions.length && !selectedId) {
+      // If ReviewDelivery told us what's selected, use that
+      if (currentPaymentId) {
+        setSelectedId(currentPaymentId);
+        return;
+      }
+
+      // Otherwise fall back to default/first
       const availableOptions = paymentOptions.filter((p: any) => {
         if (p.type === "bundle_credit") {
-          return (rawData?.bundle_credit?.credits_remaining ?? 0) > 0; // ← fix here too
+          return (rawData?.bundle_credit?.credits_remaining ?? 0) > 0;
         }
         return true;
       });
@@ -114,7 +125,7 @@ export default function PayWithScreen() {
         availableOptions.find((p: any) => p.is_default) ?? availableOptions[0];
       if (def) setSelectedId(def.id);
     }
-  }, [paymentOptions]);
+  }, [paymentOptions, currentPaymentId]);
 
   const selected = paymentOptions.find((p: any) => p.id === selectedId);
 
@@ -132,8 +143,8 @@ export default function PayWithScreen() {
         label: selected.label,
         method:
           selected.type === "bundle_credit"
-            ? "bundle" // ← was "bundle_credit"
-            : selected.provider,
+            ? "bundle"
+            : (selected.provider ?? selected.type), // ← fallback to type
         payment_method_id:
           selected.type !== "bundle_credit" ? selected.id : undefined,
       };
@@ -279,7 +290,34 @@ export default function PayWithScreen() {
                       <Text style={styles.optionSub}>{option.sub}</Text>
                     ) : null}
                     {isExhausted && (
-                      <Text style={styles.exhaustedLabel}>No credits left</Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          marginTop: 4,
+                        }}
+                      >
+                        <Text style={styles.exhaustedLabel}>
+                          No credits left
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => navigation.navigate("Bundles")} // adjust route name to yours
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        >
+                          <Text
+                            style={[
+                              styles.exhaustedLabel,
+                              {
+                                color: Colors.primary,
+                                textDecorationLine: "underline",
+                              },
+                            ]}
+                          >
+                            Buy more
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     )}
                   </View>
                   <View
@@ -474,6 +512,3 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 });
-
-
-

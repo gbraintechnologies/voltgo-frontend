@@ -78,8 +78,8 @@ export default function BundleSuccessScreen() {
           <Text style={styles.pillText}>
             {plan?.deliveries ?? 5} deliveries
           </Text>
-          <View style={styles.pillDot} />
-          <Text style={styles.pillText}>Valid {plan?.expiry ?? "30 days"}</Text>
+          {/* <View style={styles.pillDot} />
+          <Text style={styles.pillText}>Valid {plan?.expiry ?? "30 days"}</Text> */}
           <View style={styles.pillDot} />
           <Text style={styles.pillText}>{plan?.price ?? "GHS 75.00"}</Text>
         </View>

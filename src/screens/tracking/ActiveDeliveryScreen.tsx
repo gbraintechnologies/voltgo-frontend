@@ -31,7 +31,7 @@ import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
 import ChevronRightSvg from "../../assets/icons/chevron_right.svg";
 import { useRoutePolyline } from "../../utils/useRoutePolyline";
 import CUSTOM_MAP_STYLE from "../../utils/mapStyle";
-import { useCancelOrder } from "@/hooks/useApi";
+import { useCancelOrder, useOrderPolling } from "@/hooks/useApi";
 import { useOrderSocket } from "@/hooks/useOrderSocket";
 import BicycleSvg from "../../assets/icons/bicycle.svg"; // already used in RiderFoundScreen
 import MotorcycleSvg from "../../assets/icons/emoto.svg";
@@ -215,6 +215,8 @@ export default function ActiveDeliveryScreen() {
     mode: vehicleType === "e-motorcycle" ? "TWO_WHEELER" : "BICYCLE",
   });
 
+  const { data: polledOrder } = useOrderPolling(orderId ?? "");
+
   // Follow-camera mode — true once we're actively tracking the rider live
   const [followMode, setFollowMode] = useState(false);
   const lastHeadingRef = useRef<number>(0);
@@ -308,6 +310,18 @@ export default function ActiveDeliveryScreen() {
       animated: true,
     });
   }, [routeCoords, followMode]);
+
+  useEffect(() => {
+    if (!polledOrder) return;
+    if (polledOrder.status === "delivered") {
+      navigation.navigate("DeliveryComplete", {
+        riderName: route.params?.riderName ?? "Your Rider",
+        riderRating: route.params?.riderRating ?? 5,
+        itemType: route.params?.itemType ?? "Parcel",
+        isScheduled: false,
+      });
+    }
+  }, [polledOrder?.status]);
 
   const weightLabel =
     weight === "lightweight"
@@ -633,13 +647,17 @@ export default function ActiveDeliveryScreen() {
             <DetailRow label="Payment" value={paymentMethod} />
             <DetailRow label="Plate number" value={riderPlate} />
             <View style={{ height: 24 }} />
-            <TouchableOpacity
-              style={styles.cancelBtn}
-              onPress={() => setCancelModalVisible(true)} // ✅ open modal first
-              activeOpacity={0.78}
-            >
-              <Text style={styles.cancelText}>Cancel Delivery</Text>
-            </TouchableOpacity>
+            {/* {!["collected", "in_transit", "delivered"].includes(
+              (route.params as any)?.status ?? topActive?.status ?? "",
+            ) && (
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setCancelModalVisible(true)}
+                activeOpacity={0.78}
+              >
+                <Text style={styles.cancelText}>Cancel Delivery</Text>
+              </TouchableOpacity>
+            )} */}
 
             <View style={{ height: 40 }} />
           </Animated.View>

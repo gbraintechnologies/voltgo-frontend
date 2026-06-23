@@ -198,6 +198,24 @@ export default function RiderFoundScreen() {
   }, [order]);
 
   useEffect(() => {
+    if (!order) return;
+    if (order.status === "rider_arriving") {
+      navigation.replace("RiderArriving", { ...route.params, orderId });
+    }
+    if (order.status === "collected" || order.status === "in_transit") {
+      navigation.replace("ActiveDelivery", { ...route.params, orderId });
+    }
+    if (order.status === "delivered") {
+      navigation.replace("DeliveryComplete", {
+        riderName: order.rider?.full_name ?? "Your Rider",
+        riderRating: order.rider?.rating ?? 5,
+        itemType: (route.params as any)?.itemType ?? "Parcel",
+        isScheduled: false,
+      });
+    }
+  }, [order?.status]);
+
+  useEffect(() => {
     if (!mapRef.current) return;
     const points =
       routeCoords.length > 0 ? routeCoords : [pickupCoord, dropoffCoord];

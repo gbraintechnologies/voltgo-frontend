@@ -4,6 +4,7 @@ import { ordersApi, BookDeliveryBody, OrderStatus, Order } from "../api/orders";
 import { bundlesApi, BundleStatus } from "../api/bundles";
 import { paymentApi, AddMomoBody } from "../api/payments";
 import { useAuthStore } from "../stores/authStore";
+import { primeSocketToken } from "@/utils/socket";
 
 // ── Query keys ───────────────────────────────────────────────────────────────
 export const QK = {
@@ -91,6 +92,8 @@ export const useLogin = () => {
         };
 
         setAuthenticated(customer, token, refreshToken);
+        primeSocketToken();
+
         qc.setQueryData(QK.me, { success: true, data: customer });
       }
     },
@@ -158,8 +161,10 @@ export const useOrderPolling = (id: string) =>
     queryKey: QK.order(id),
     queryFn: async () => {
       if (!id) return null;
-      const res: any = await ordersApi.getOrder(id); // GET /orders/{id} — already in your api/orders.ts
-      return res?.data?.data ?? null;
+      const res: any = await ordersApi.getOrder(id);
+      console.log('useorderpolling logs:', res)
+      // res = { status: 200, message: "...", data: { id, status, ... } }
+      return res?.data ?? null;  // ← was res?.data?.data
     },
     enabled: !!id,
     refetchInterval: 5000,
@@ -316,3 +321,5 @@ export const useRemovePayment = () => {
     },
   });
 };
+
+

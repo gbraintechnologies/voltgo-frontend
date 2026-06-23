@@ -1,12 +1,12 @@
 /**
- * Toast.tsx
+ * Toast.tsx — CUSTOMER APP
  * ─────────────────────────────────────────────────────────
- * Lightweight, imperative toast system for VoltGO.
+ * WhatsApp-style minimal pill toast.
  * Supports success, error, info, and warning variants.
  *
  * Setup:
  *   1. Wrap your root navigator with <ToastProvider>
- *   2. Call toast.show / toast.success / toast.error anywhere
+ *   2. Call toast.success / toast.error / toast.info / toast.warning anywhere
  *
  * Usage:
  *   import { useToast } from '../components/common/Toast';
@@ -14,6 +14,7 @@
  *   toast.success("Package booked!");
  *   toast.error("Login failed. Check your credentials.");
  *   toast.info("OTP sent to your phone.");
+ *   toast.warning("Please check your connection.");
  *   toast.show({ message: "Custom", variant: "warning", duration: 4000 });
  */
 
@@ -26,7 +27,6 @@ import React, {
 } from "react";
 import {
   Animated,
-  Dimensions,
   Platform,
   StyleSheet,
   Text,
@@ -41,213 +41,145 @@ export type ToastVariant = "success" | "error" | "info" | "warning";
 export interface ToastOptions {
   message: string;
   variant?: ToastVariant;
-  /** ms — default 3500 */
+  /** ms — default 3000 */
   duration?: number;
-  /** Optional sub-label under the main message */
-  subtitle?: string;
 }
 
 interface ToastContextValue {
   show: (opts: ToastOptions) => void;
-  success: (message: string, subtitle?: string) => void;
+  success: (message: string, subtitle?: string) => void; // add subtitle?
   error: (message: string, subtitle?: string) => void;
   info: (message: string, subtitle?: string) => void;
   warning: (message: string, subtitle?: string) => void;
   dismiss: () => void;
 }
-
 // ─── Context ──────────────────────────────────────────────────────────────────
 const ToastContext = createContext<ToastContextValue | null>(null);
 
-// ─── Config ───────────────────────────────────────────────────────────────────
-const VARIANTS: Record<
-  ToastVariant,
-  { bg: string; border: string; icon: string; iconColor: string; textColor: string }
-> = {
-  success: {
-    bg: "#F0FDF4",
-    border: "#4CD964",
-    icon: "✓",
-    iconColor: "#16A34A",
-    textColor: "#14532D",
-  },
-  error: {
-    bg: "#FEF2F2",
-    border: "#EF4444",
-    icon: "✕",
-    iconColor: "#DC2626",
-    textColor: "#7F1D1D",
-  },
-  info: {
-    bg: "#EFF6FF",
-    border: "#3B82F6",
-    icon: "i",
-    iconColor: "#2563EB",
-    textColor: "#1E3A8A",
-  },
-  warning: {
-    bg: "#FFFBEB",
-    border: "#F59E0B",
-    icon: "!",
-    iconColor: "#D97706",
-    textColor: "#78350F",
-  },
+// ─── Accent dot colors — matches customer app palette ─────────────────────────
+const ACCENT: Record<ToastVariant, string> = {
+  success: "#4CD964", // app primary green
+  error: "#EF4444",
+  info: "#3B82F6",
+  warning: "#F59E0B",
 };
 
-const DEFAULT_DURATION = 3500;
-const SCREEN_WIDTH = Dimensions.get("window").width;
+const DEFAULT_DURATION = 3000;
+const ANIM_MS = 200;
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const insets = useSafeAreaInsets();
-  const [toast, setToast] = useState<(ToastOptions & { id: number }) | null>(null);
-  const translateY = useRef(new Animated.Value(-120)).current;
+  const [toast, setToast] = useState<(ToastOptions & { id: number }) | null>(
+    null,
+  );
   const opacity = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.92)).current;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idRef = useRef(0);
 
   const dismiss = useCallback(() => {
     Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: -120,
-        duration: 260,
-        useNativeDriver: true,
-      }),
       Animated.timing(opacity, {
         toValue: 0,
-        duration: 220,
+        duration: ANIM_MS,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scale, {
+        toValue: 0.92,
+        duration: ANIM_MS,
         useNativeDriver: true,
       }),
     ]).start(() => setToast(null));
-  }, [translateY, opacity]);
+  }, [opacity, scale]);
 
   const show = useCallback(
     (opts: ToastOptions) => {
-      // Clear any pending dismiss timer
       if (timerRef.current) clearTimeout(timerRef.current);
 
       idRef.current += 1;
       const id = idRef.current;
 
-      // Reset position instantly before showing
-      translateY.setValue(-120);
+      // Reset before showing
       opacity.setValue(0);
+      scale.setValue(0.92);
       setToast({ ...opts, id });
 
-      // Slide in
       Animated.parallel([
-        Animated.spring(translateY, {
-          toValue: 0,
-          tension: 70,
-          friction: 11,
-          useNativeDriver: true,
-        }),
         Animated.timing(opacity, {
           toValue: 1,
-          duration: 200,
+          duration: ANIM_MS,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scale, {
+          toValue: 1,
+          tension: 120,
+          friction: 10,
           useNativeDriver: true,
         }),
       ]).start();
 
-      // Auto-dismiss
       timerRef.current = setTimeout(() => {
-        // Only dismiss if this toast is still the active one
         if (idRef.current === id) dismiss();
       }, opts.duration ?? DEFAULT_DURATION);
     },
-    [translateY, opacity, dismiss],
+    [opacity, scale, dismiss],
   );
 
   const success = useCallback(
-    (message: string, subtitle?: string) =>
-      show({ message, subtitle, variant: "success" }),
+    (message: string, _subtitle?: string) =>
+      show({ message, variant: "success" }),
     [show],
   );
   const error = useCallback(
-    (message: string, subtitle?: string) =>
-      show({ message, subtitle, variant: "error" }),
+    (message: string, _subtitle?: string) =>
+      show({ message, variant: "error" }),
     [show],
   );
   const info = useCallback(
-    (message: string, subtitle?: string) =>
-      show({ message, subtitle, variant: "info" }),
+    (message: string, _subtitle?: string) => show({ message, variant: "info" }),
     [show],
   );
   const warning = useCallback(
-    (message: string, subtitle?: string) =>
-      show({ message, subtitle, variant: "warning" }),
+    (message: string, _subtitle?: string) =>
+      show({ message, variant: "warning" }),
     [show],
   );
 
-  const config = VARIANTS[toast?.variant ?? "info"];
+  const topOffset = (Platform.OS === "ios" ? insets.top : insets.top + 8) + 12;
 
   return (
-    <ToastContext.Provider value={{ show, success, error, info, warning, dismiss }}>
+    <ToastContext.Provider
+      value={{ show, success, error, info, warning, dismiss }}
+    >
       {children}
 
-      {/* Toast overlay — rendered on top of everything */}
       {toast && (
-        <Animated.View
-          style={[
-            styles.container,
-            {
-              top: insets.top + (Platform.OS === "ios" ? 8 : 12),
-              opacity,
-              transform: [{ translateY }],
-            },
-          ]}
+        <View
+          style={[styles.overlay, { top: topOffset }]}
           pointerEvents="box-none"
         >
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={dismiss}
-            style={[
-              styles.toast,
-              {
-                backgroundColor: config.bg,
-                // borderLeftColor: config.border,
-              },
-            ]}
+          <Animated.View
+            style={[styles.pill, { opacity, transform: [{ scale }] }]}
           >
-            {/* Icon circle */}
-            <View
-              style={[styles.iconCircle, { backgroundColor: config.border }]}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={dismiss}
+              style={styles.pillInner}
             >
-              <Text style={[styles.iconText, { color: "#fff" }]}>
-                {config.icon}
-              </Text>
-            </View>
-
-            {/* Text */}
-            <View style={styles.textWrap}>
-              <Text
-                style={[styles.message, { color: config.textColor }]}
-                numberOfLines={2}
-              >
+              {/* Accent dot */}
+              <View
+                style={[
+                  styles.dot,
+                  { backgroundColor: ACCENT[toast.variant ?? "info"] },
+                ]}
+              />
+              <Text style={styles.message} numberOfLines={2}>
                 {toast.message}
               </Text>
-              {toast.subtitle ? (
-                <Text
-                  style={[styles.subtitle, { color: config.textColor }]}
-                  numberOfLines={1}
-                >
-                  {toast.subtitle}
-                </Text>
-              ) : null}
-            </View>
-
-            {/* Dismiss X */}
-            <TouchableOpacity
-              onPress={dismiss}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              style={styles.closeBtn}
-            >
-              <Text style={[styles.closeText, { color: config.iconColor }]}>
-                ✕
-              </Text>
             </TouchableOpacity>
-          </TouchableOpacity>
-        </Animated.View>
+          </Animated.View>
+        </View>
       )}
     </ToastContext.Provider>
   );
@@ -256,75 +188,49 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 export function useToast(): ToastContextValue {
   const ctx = useContext(ToastContext);
-  if (!ctx) {
-    throw new Error("useToast must be used within a <ToastProvider>");
-  }
+  if (!ctx) throw new Error("useToast must be used within a <ToastProvider>");
   return ctx;
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
+  overlay: {
     position: "absolute",
-    left: 16,
-    right: 16,
+    left: 0,
+    right: 0,
     zIndex: 9999,
-    elevation: 99,
+    elevation: 9999,
+    alignItems: "center", // centers pill horizontally
   },
-  toast: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    // borderLeftWidth: 4,
-    gap: 12,
-    // Shadow
+  pill: {
+    maxWidth: "80%",
+    minWidth: 120,
+    backgroundColor: "#0B1F3A", // app navy — consistent with brand
+    borderRadius: 20,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
     elevation: 8,
   },
-  iconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  pillInner: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
     flexShrink: 0,
-  },
-  iconText: {
-    fontSize: 13,
-    fontFamily: "Poppins-Bold",
-    lineHeight: 16,
-  },
-  textWrap: {
-    flex: 1,
   },
   message: {
-    fontFamily: "Poppins-SemiBold",
-    fontSize: 13.5,
-    lineHeight: 20,
-  },
-  subtitle: {
     fontFamily: "Poppins-Regular",
-    fontSize: 12,
-    marginTop: 1,
-    opacity: 0.8,
-  },
-  closeBtn: {
-    width: 22,
-    height: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  closeText: {
-    fontSize: 11,
-    fontFamily: "Poppins-Bold",
+    fontSize: 13,
+    color: "#F1F1F1",
+    flexShrink: 1,
+    lineHeight: 18,
   },
 });
-
-
-

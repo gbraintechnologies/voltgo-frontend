@@ -218,21 +218,29 @@ export default function RiderArrivingScreen() {
     });
   }, [routeCoords]);
 
-  useEffect(() => {
-    if (!polledOrder) return;
-    if (["collected", "in_transit"].includes(polledOrder.status)) {
-      navigation.replace("ActiveDelivery", {
-        ...route.params,
-        orderId,
-        riderName: polledOrder.rider?.full_name ?? route.params?.riderName,
-        riderPlate:
-          polledOrder.rider?.vehicle?.plate_no ?? route.params?.riderPlate,
-        riderRating: polledOrder.rider?.rating ?? route.params?.riderRating,
-        pickupCoords: route.params?.pickupCoords,
-        dropoffCoords: route.params?.dropoffCoords,
-      });
-    }
-  }, [polledOrder?.status]);
+useEffect(() => {
+  if (!polledOrder) return;
+  if (["collected", "in_transit"].includes(polledOrder.status)) {
+    navigation.replace("ActiveDelivery", {
+      ...route.params,
+      orderId,
+      riderName: polledOrder.rider?.full_name ?? route.params?.riderName,
+      riderPlate: polledOrder.rider?.vehicle?.plate_no ?? route.params?.riderPlate,
+      riderRating: polledOrder.rider?.rating ?? route.params?.riderRating,
+      pickupCoords: route.params?.pickupCoords,
+      dropoffCoords: route.params?.dropoffCoords,
+    });
+  }
+  // ADD THIS:
+  if (polledOrder.status === "delivered") {
+    navigation.replace("DeliveryComplete", {
+      riderName: polledOrder.rider?.full_name ?? route.params?.riderName ?? "Your Rider",
+      riderRating: polledOrder.rider?.rating ?? route.params?.riderRating ?? 5,
+      itemType: route.params?.itemType ?? "Parcel",
+      isScheduled: false,
+    });
+  }
+}, [polledOrder?.status]);
 
   // Animate rider along route
   useEffect(() => {
@@ -731,3 +739,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 });
+
+
+
+

@@ -195,6 +195,7 @@ export default function HomeMapScreen() {
 
   const allOrders: Order[] =
     (ordersRes?.data as any)?.items ?? ordersRes?.data?.orders ?? [];
+    
   const activeOrders = allOrders.filter((o) =>
     ACTIVE_STATUSES.includes(o.status),
   );

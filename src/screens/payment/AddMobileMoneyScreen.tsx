@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import ArrowBackSvg from "../../assets/icons/arrow_back.svg";
-import { useAddMomo } from "../../hooks/useApi";
+import { useAddMomo, usePaymentMethods } from "../../hooks/useApi";
 import { MomoProvider } from "../../api/payments";
 import { ApiError } from "../../api/client";
 import * as Haptics from "expo-haptics";
@@ -43,21 +43,21 @@ const NETWORKS: {
   {
     id: "mtn_momo",
     label: "MTN",
-    display: "MTN",        // unchanged
+    display: "MTN", // unchanged
     color: "#FFCB00",
     textColor: "#0B1F3A",
   },
   {
     id: "vodafone_cash",
     label: "Tel",
-    display: "Tel",        // was "Telecel"
+    display: "Tel", // was "Telecel"
     color: "#E2001A",
     textColor: "#FFFFFF",
   },
   {
     id: "airteltigo_money",
     label: "AT",
-    display: "AT",         // was "AirtelTigo"
+    display: "AT", // was "AirtelTigo"
     color: "#0066B3",
     textColor: "#FFFFFF",
   },
@@ -80,6 +80,9 @@ export default function AddMobileMoneyScreen() {
 
   const nameFocus = useRef(new Animated.Value(0)).current;
   const phoneFocus = useRef(new Animated.Value(0)).current;
+
+  const { data: existingMethodsData } = usePaymentMethods();
+  const existingMethods = existingMethodsData?.data ?? [];
 
   const addMomoMutation = useAddMomo();
 
@@ -121,12 +124,24 @@ export default function AddMobileMoneyScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       return;
     }
+
+    // Check for duplicate number
+    const normalizedPhone = phone.replace(/\s/g, "");
+    const isDuplicate = existingMethods.some(
+      (m) => m.account_number === normalizedPhone,
+    );
+    if (isDuplicate) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      toast.error("This number is already saved as a payment method.");
+      return;
+    }
+
     try {
       await addMomoMutation.mutateAsync({
         type: "momo",
         provider: network,
         account_name: name.trim(),
-        account_number: phone.replace(/\s/g, ""),
+        account_number: normalizedPhone,
         is_default: false,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -303,26 +318,26 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     letterSpacing: 0.1,
   },
-  networkRow: { 
-    flexDirection: "row", 
-    gap: 10, 
+  networkRow: {
+    flexDirection: "row",
+    gap: 10,
     marginBottom: 24,
   },
   networkChip: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: 'center',
+    justifyContent: "center",
     gap: 6,
     paddingVertical: 12,
-    paddingHorizontal: 8,   // reduced from 12
+    paddingHorizontal: 8, // reduced from 12
     borderRadius: 16,
     backgroundColor: Colors.white,
-    borderWidth: 2,                    // always reserve border space
-    borderColor: "transparent",        // invisible by default — no layout shift
+    borderWidth: 2, // always reserve border space
+    borderColor: "transparent", // invisible by default — no layout shift
     // removed all shadow props
   },
-  networkChipActive: { borderColor: Colors.navy},
+  networkChipActive: { borderColor: Colors.navy },
   networkBadge: {
     width: 34,
     height: 22,
@@ -374,5 +389,3 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 });
-
-

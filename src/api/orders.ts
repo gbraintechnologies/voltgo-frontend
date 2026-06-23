@@ -58,6 +58,7 @@ export interface BookDeliveryBody {
   payment_method: string;
   payment_method_id?: string;
   price_ghs: number;
+  scheduled_at?: string;
 }
 
 export interface OrdersResponse {

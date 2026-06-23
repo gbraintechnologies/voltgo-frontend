@@ -3,6 +3,7 @@ import {
   connectCustomerSocket,
   disconnectSocket,
   getSocket,
+  joinOrderRoom,
 } from "../utils/socket";
 import { useAuthStore } from "../stores/authStore";
 import { AppState } from "react-native";
@@ -10,7 +11,7 @@ import { AppState } from "react-native";
 export interface OrderStatusPayload {
   order_id: string;
   status: "rider_arriving" | "collected" | "in_transit" | "delivered";
-  rider?: { id: string; full_name: string; phone: string, photo_url: string };
+  rider?: { id: string; full_name: string; phone: string; photo_url: string };
   proof_of_delivery_url?: string;
   timestamp: string;
 }
@@ -40,6 +41,11 @@ export function useOrderSocket({
 
     const socket = connectCustomerSocket(customer.id);
 
+    // THIS is the fix — join the order room every time this hook mounts
+    // with a valid orderId. Without this, status_changed and rider:location
+    // events never reach the customer on ANY screen.
+    joinOrderRoom(orderId);
+
     const handleStatus = (payload: OrderStatusPayload) => {
       if (payload.order_id !== orderId) return;
       onStatusChanged?.(payload);
@@ -56,6 +62,7 @@ export function useOrderSocket({
     const handleAppState = (state: string) => {
       if (state === "active" && customer?.id) {
         connectCustomerSocket(customer.id);
+        joinOrderRoom(orderId); // re-join on foreground resume
       }
     };
     const sub = AppState.addEventListener("change", handleAppState);
@@ -67,9 +74,5 @@ export function useOrderSocket({
     };
   }, [orderId, customer?.id]);
 }
-
-
-
-
 
 

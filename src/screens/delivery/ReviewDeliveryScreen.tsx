@@ -136,12 +136,12 @@ export default function ReviewDeliveryScreen() {
   const { mutateAsync: bookDelivery, isPending: isBooking } = useBookDelivery();
 
   useEffect(() => {
-    if (selectedPayment) return; // already set (e.g. came back from PayWith)
+    // ← Add this guard: don't overwrite a selection that came back from PayWith
+    if (selectedPayment) return;
 
     const rawData = paymentOptionsRes?.data as any;
     if (!rawData) return;
 
-    // Build the same options list PayWith uses
     const bundleCredit = rawData.bundle_credit;
     const hasCredits = (bundleCredit?.credits_remaining ?? 0) > 0;
 
@@ -155,7 +155,6 @@ export default function ReviewDeliveryScreen() {
       return;
     }
 
-    // Fall back to first saved payment method
     const methods: any[] = rawData.payment_methods ?? [];
     if (methods.length > 0) {
       const first = methods[0];
@@ -166,7 +165,7 @@ export default function ReviewDeliveryScreen() {
         payment_method_id: first.id,
       });
     }
-  }, [paymentOptionsRes, selectedPayment]);
+  }, [paymentOptionsRes]);
 
   useEffect(() => {
     Animated.parallel([
@@ -237,8 +236,45 @@ export default function ReviewDeliveryScreen() {
           : {}),
       });
 
+      console.log("[ReviewDelivery] FULL res:", JSON.stringify(res, null, 2));
+      console.log("[DEBUG] res keys:", Object.keys(res as any));
+      console.log(
+        "[DEBUG] res.data:",
+        JSON.stringify((res as any)?.data, null, 2),
+      );
+      console.log("[DEBUG] full res:", JSON.stringify(res, null, 2));
+
+      const anyRes = res as any;
       const orderId =
-        (res as any)?.data?.order?.id ?? (res as any)?.data?.data?.order?.id;
+        anyRes?.data?.id ?? // { data: { id } }
+        anyRes?.data?.order?.id ?? // { data: { order: { id } } }
+        anyRes?.data?.data?.id ?? // { data: { data: { id } } }
+        anyRes?.id; // { id }
+
+      console.log(
+        "[DEBUG] Full booking response:",
+        JSON.stringify(anyRes, null, 2),
+      );
+      console.log("[DEBUG] orderId resolved:", orderId);
+
+      console.log("[DEBUG] orderId candidates:", {
+        "data.id": anyRes?.data?.id,
+        "data.data.id": anyRes?.data?.data?.id,
+        id: anyRes?.id,
+        full: JSON.stringify(anyRes),
+      });
+      console.log(
+        "[ReviewDelivery] booking response:",
+        JSON.stringify(res, null, 2),
+      );
+      console.log("[ReviewDelivery] extracted orderId:", orderId);
+
+      if (!orderId) {
+        toast.error(
+          "Booking failed — could not get order ID. Please try again.",
+        );
+        return;
+      }
 
       if (isScheduled) {
         navigation.navigate("DeliveryComplete", {
@@ -249,10 +285,7 @@ export default function ReviewDeliveryScreen() {
         navigation.navigate("RiderMatching", { ...route.params, orderId });
       }
     } catch (err: any) {
-      toast.error(
-        "Booking failed",
-        err?.message ?? "Could not place order. Please try again.",
-      );
+      toast.error(err?.message ?? "Could not place order. Please try again.");
     }
   };
 
@@ -343,6 +376,7 @@ export default function ReviewDeliveryScreen() {
             navigation.navigate("PayWith", {
               ...route.params,
               returnTo: "ReviewDelivery",
+              currentPaymentId: selectedPayment?.id, // ← add this
             })
           }
           activeOpacity={0.75}
@@ -617,3 +651,5 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 });
+
+

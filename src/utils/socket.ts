@@ -9,7 +9,15 @@ let cachedToken: string | null = null;
 // Call this once at app startup (e.g. in authStore.setAuthenticated)
 // so the token is ready before any socket connection is needed.
 export async function primeSocketToken() {
-  cachedToken = await tokenStorage.getAccessToken();
+  const newToken = await tokenStorage.getAccessToken();
+  
+  // If token changed and socket already exists with wrong token, destroy it
+  if (newToken !== cachedToken && socket) {
+    socket.disconnect();
+    socket = null;
+  }
+  
+  cachedToken = newToken;
 }
 
 export function getSocket(): Socket {
@@ -41,6 +49,7 @@ export function connectCustomerSocket(userId: string): Socket {
 // In utils/socket.ts (customer) — add this function:
 export function joinOrderRoom(orderId: string): void {
   const s = getSocket();
+  console.log('[Socket] joining order room:', orderId, 'connected:', s.connected, 'token:', cachedToken ? 'present' : 'MISSING');
   if (s.connected) {
     s.emit('join_order', { orderId });
   } else {

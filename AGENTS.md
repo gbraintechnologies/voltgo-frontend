@@ -19,15 +19,15 @@ curl -X 'POST' \
 curl -X 'GET' \
   'https://api.voltgoapp.com/api/v1/admin/orders' \
   -H 'accept: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZG1pbklkIjoiYjQzZGEwYTQtZmRhNS00ZjUyLTkzMTEtMjUyM2Y4YTQ1ZGY0IiwiaWF0IjoxNzgxOTAxMTYwLCJleHAiOjE3ODE5ODM5NjB9.nVtl9MkE4W1VIRSAcPidYBLPTAomw9nR3Yrt62AoV7k'
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZG1pbklkIjoiYjQzZGEwYTQtZmRhNS00ZjUyLTkzMTEtMjUyM2Y4YTQ1ZGY0IiwiaWF0IjoxNzgyMTU5MTM4LCJleHAiOjE3ODIyNDE5Mzh9.B9VwkVy4Zy2c_O07-63DsFyGwE8jJwBHOZA1u3kmL4Q'
 
 Look for the entry with the most recent created_at and status: "pending" or "searching". Grab its id.
 Step 2 — assign your rider (Bernard Bosro):
 
 curl -X 'PUT' \
-  'https://api.voltgoapp.com/api/v1/admin/orders/6c4a78b6-c077-44de-b307-f756d35d436e/assign-rider' \
+  'https://api.voltgoapp.com/api/v1/admin/orders/ab46a5f6-1458-4e42-9768-88413d538e9d/assign-rider' \
   -H 'accept: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZG1pbklkIjoiYjQzZGEwYTQtZmRhNS00ZjUyLTkzMTEtMjUyM2Y4YTQ1ZGY0IiwiaWF0IjoxNzgxOTAxMTYwLCJleHAiOjE3ODE5ODM5NjB9.nVtl9MkE4W1VIRSAcPidYBLPTAomw9nR3Yrt62AoV7k' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZG1pbklkIjoiYjQzZGEwYTQtZmRhNS00ZjUyLTkzMTEtMjUyM2Y4YTQ1ZGY0IiwiaWF0IjoxNzgyMTU5MTM4LCJleHAiOjE3ODIyNDE5Mzh9.B9VwkVy4Zy2c_O07-63DsFyGwE8jJwBHOZA1u3kmL4Q' \
   -H 'Content-Type: application/json' \
   -d '{"rider_id": "879afbca-f297-4165-9a9a-d225c7c10b0b"}'
 

@@ -458,6 +458,55 @@ export default function ActivitiesScreen() {
   const hasActiveFilters =
     filters.months.length > 0 || filters.vehicles.length > 0;
 
+  const rowAnimations = useRef<
+    Map<
+      string,
+      {
+        translateX: Animated.Value;
+        opacity: Animated.Value;
+        height: Animated.Value;
+      }
+    >
+  >(new Map()).current;
+
+  // Get or create animation values for an order
+  const getRowAnim = (id: string) => {
+    if (!rowAnimations.has(id)) {
+      rowAnimations.set(id, {
+        translateX: new Animated.Value(0),
+        opacity: new Animated.Value(1),
+        height: new Animated.Value(300), // large enough to never clip
+      });
+    }
+    return rowAnimations.get(id)!;
+  };
+
+  const animateRowOut = (orderId: string, callback: () => void) => {
+    const anim = getRowAnim(orderId);
+
+    Animated.sequence([
+      // Step 1: slide left + fade out
+      Animated.parallel([
+        Animated.timing(anim.translateX, {
+          toValue: -500,
+          duration: 280,
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim.opacity, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]),
+      // Step 2: collapse the space so items above shift up
+      Animated.timing(anim.height, {
+        toValue: 0,
+        duration: 220,
+        useNativeDriver: false,
+      }),
+    ]).start(() => callback());
+  };
+
   useEffect(() => {
     Animated.timing(fadeIn, {
       toValue: 1,
@@ -473,18 +522,40 @@ export default function ActivitiesScreen() {
 
   const confirmCancel = async (reason: string) => {
     if (!cancelTarget) return;
-    try {
-      await cancelMutation.mutateAsync({
-        id: cancelTarget.id,
-        reason,
-      });
-      setCancelTarget(null);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      toast.success("Order cancelled");
-    } catch {
-      setCancelTarget(null);
-      toast.error("Could not cancel this order. Please try again.");
-    }
+    const targetId = cancelTarget.id;
+
+    // Dismiss modal immediately so user sees the animation
+    setCancelTarget(null);
+
+    animateRowOut(targetId, async () => {
+      try {
+        await cancelMutation.mutateAsync({ id: targetId, reason });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        toast.success("Order cancelled");
+        rowAnimations.delete(targetId);
+      } catch {
+        // Rollback — slide back in
+        const anim = getRowAnim(targetId);
+        Animated.parallel([
+          Animated.timing(anim.translateX, {
+            toValue: 0,
+            duration: 250,
+            useNativeDriver: true,
+          }),
+          Animated.timing(anim.opacity, {
+            toValue: 1,
+            duration: 250,
+            useNativeDriver: true,
+          }),
+          Animated.timing(anim.height, {
+            toValue: 300, // ← match initial value
+            duration: 250,
+            useNativeDriver: false,
+          }),
+        ]).start();
+        toast.error("Could not cancel this order. Please try again.");
+      }
+    });
   };
 
   const handleTrack = (order: Order) => {
@@ -650,48 +721,64 @@ export default function ActivitiesScreen() {
                   <Text style={styles.monthHeader}>{month}</Text>
                   <View style={styles.monthLine} />
                 </View>
-                {items.map((item, index) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[
-                      styles.pastRow,
-                      index < items.length - 1 && styles.pastRowBorder,
-                    ]}
-                    onPress={() =>
-                      navigation.navigate("ActivityDetail", { activity: item })
-                    }
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.vehicleIconWrap}>
-                      <Image
-                        source={
-                          item.vehicle_type === "bicycle"
-                            ? require("../../assets/images/bicycle_small.png")
-                            : require("../../assets/images/emoto_small.png")
-                        }
-                        style={styles.vehicleIcon}
-                        resizeMode="contain"
-                      />
-                    </View>
-                    <View style={styles.pastInfo}>
-                      <Text style={styles.pastDestination}>
-                        {item.dropoff_address}
-                      </Text>
-                      <Text style={styles.pastDate}>
-                        {formatDate(item.created_at)}
-                      </Text>
-                      <Text style={styles.pastAmount}>
-                        GHS {Number(item.price_ghs ?? 0).toFixed(2)}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.repeatBtn}
-                      activeOpacity={0.7}
+                {items.map((item, index) => {
+                  const anim = getRowAnim(item.id);
+                  return (
+                    <Animated.View
+                      key={item.id}
+                      style={{
+                        opacity: anim.opacity,
+                        transform: [{ translateX: anim.translateX }],
+                        // Remove the fixed height entirely — let content size naturally
+                        // Height only gets animated during removal via maxHeight
+                        maxHeight: anim.height,
+                        overflow: "hidden",
+                      }}
                     >
-                      <RepeatIconSvg width={20} height={20} />
-                    </TouchableOpacity>
-                  </TouchableOpacity>
-                ))}
+                      <TouchableOpacity
+                        style={[
+                          styles.pastRow,
+                          index < items.length - 1 && styles.pastRowBorder,
+                        ]}
+                        onPress={() =>
+                          navigation.navigate("ActivityDetail", {
+                            activity: item,
+                          })
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.vehicleIconWrap}>
+                          <Image
+                            source={
+                              item.vehicle_type === "bicycle"
+                                ? require("../../assets/images/bicycle_small.png")
+                                : require("../../assets/images/emoto_small.png")
+                            }
+                            style={styles.vehicleIcon}
+                            resizeMode="contain"
+                          />
+                        </View>
+                        <View style={styles.pastInfo}>
+                          <Text style={styles.pastDestination}>
+                            {item.dropoff_address}
+                          </Text>
+                          <Text style={styles.pastDate}>
+                            {formatDate(item.created_at)}
+                          </Text>
+                          <Text style={styles.pastAmount}>
+                            GHS {Number(item.price_ghs ?? 0).toFixed(2)}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.repeatBtn}
+                          activeOpacity={0.7}
+                        >
+                          <RepeatIconSvg width={20} height={20} />
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  );
+                })}
               </View>
             ))
           )
@@ -1016,4 +1103,3 @@ const styles = StyleSheet.create({
   },
   repeatBtn: { padding: 6 },
 });
-

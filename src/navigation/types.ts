@@ -75,13 +75,14 @@ export type DeliveryStackParamList = {
     };
   };
   PayWith: {
-    vehicleType: "bicycle" | "e-motorcycle";
-    price: number;
-    pickup: string;
-    dropoff: string;
+    vehicleType?: string;
+    price?: number;
+    pickup?: string;
+    dropoff?: string;
     pickupCoords?: { latitude: number; longitude: number };
     dropoffCoords?: { latitude: number; longitude: number };
     returnTo?: string;
+    currentPaymentId?: string; // ← add this
   };
   AddPaymentMethod: undefined;
   TermsCondition: undefined;
@@ -121,6 +122,8 @@ export type DeliveryStackParamList = {
     dropoff?: string;
     pickupCoords?: { latitude: number; longitude: number }; // ← add
     dropoffCoords?: { latitude: number; longitude: number }; // ← add
+    itemType?: string; // ← add this
+    paymentMethod?: string; // ← add this too for the DeliveryComplete nav
   };
   ActiveDelivery: {
     orderId?: string;
@@ -143,7 +146,7 @@ export type DeliveryStackParamList = {
     itemType?: string;
     isScheduled?: boolean;
     scheduledTime?: string;
-    scheduledDate?: string; 
+    scheduledDate?: string;
   };
   AddMobileMoney: undefined;
   AddCard: undefined;
@@ -160,5 +163,3 @@ export type BundlesStackParamList = {
   BundleSuccess: undefined;
   BundleHistory: undefined;
 };
-
-

@@ -187,8 +187,13 @@ export default function RiderMatchingScreen() {
   const route = useRoute<RouteParams>();
   const params = route.params ?? {};
 
+
   const cancelMutation = useCancelOrder();
   const orderId = (params as any).orderId as string | undefined;
+
+  
+  console.log('[RiderMatching] orderId:', orderId);
+  console.log('[RiderMatching] params:', JSON.stringify(params));
 
   // ← NEW: modal state instead of Alert
   const [cancelModalVisible, setCancelModalVisible] = useState(false);
@@ -253,13 +258,6 @@ export default function RiderMatchingScreen() {
   useEffect(() => {
     if (!order) return;
 
-    console.log(
-      "Order status:",
-      order.status,
-      "Rider:",
-      order.rider?.full_name,
-    );
-
     if (order.status === "cancelled" || order.status === "failed") {
       navigation.getParent()?.navigate("MainTabs", { screen: "HomeMap" });
       return;
@@ -281,12 +279,30 @@ export default function RiderMatchingScreen() {
         dropoffCoords: dropoffCoord,
       });
     }
+
+    if (order.status === "collected" || order.status === "in_transit") {
+      navigation.replace("ActiveDelivery", {
+        ...params,
+        orderId,
+        riderName: order.rider?.full_name ?? "Your Rider",
+        riderPlate: order.rider?.vehicle?.plate_no ?? "",
+        riderRating: order.rider?.rating ?? 5,
+        pickupCoords: pickupCoord,
+        dropoffCoords: dropoffCoord,
+      });
+    }
   }, [order?.status]);
 
   useOrderSocket({
     orderId: orderId ?? "",
     onStatusChanged: (payload: any) => {
-      if (payload.status === "rider_arriving") {
+      const status = payload.status as string;
+
+      if (
+        status === "assigned" ||
+        status === "accepted" ||
+        status === "rider_arriving"
+      ) {
         navigation.replace("RiderFound", {
           ...params,
           orderId,
@@ -294,6 +310,19 @@ export default function RiderMatchingScreen() {
           riderPlate: payload.rider?.vehicle?.plate_no ?? "",
           riderRating: payload.rider?.rating ?? 5,
           riderPhoto: payload.rider?.photo_url ?? null,
+          vehicleType: params.vehicleType ?? "motorcycle",
+          pickupCoords: pickupCoord,
+          dropoffCoords: dropoffCoord,
+        });
+      }
+
+      if (status === "collected" || status === "in_transit") {
+        navigation.replace("ActiveDelivery", {
+          ...params,
+          orderId,
+          riderName: payload.rider?.full_name ?? "Your Rider",
+          riderPlate: payload.rider?.vehicle?.plate_no ?? "",
+          riderRating: (payload.rider?.rating ?? 5) as number,
           pickupCoords: pickupCoord,
           dropoffCoords: dropoffCoord,
         });
@@ -566,3 +595,5 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 });
+
+
